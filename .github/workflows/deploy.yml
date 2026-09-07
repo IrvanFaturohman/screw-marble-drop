@@ -1,0 +1,48 @@
+# Build the prototype and publish it to GitHub Pages, so it can be played from a
+# link instead of cloned. `vite.config.ts` uses a relative `base`, so the build
+# works unchanged under the /screw-marble-drop/ sub-path Pages serves from.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two deploys race; the newest push wins.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      # The level is proved before it ships: 119 assertions, a solvability
+      # search and a full play-through on the real Rapier physics. A board whose
+      # crossings are not all pinned must not reach the page.
+      - run: npm run validate
+      - run: npm run build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
