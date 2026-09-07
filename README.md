@@ -14,10 +14,12 @@ carrying pours onto a conveyor that only holds 24.
 npm install
 npm run dev        # http://localhost:5176
 npm run build      # tsc --noEmit && vite build
-npm run validate   # headless: 119 assertions, a solvability search, a play-through
+npm run validate   # headless: every rule, a solvability search, a play-through
+npm run validate -- --level 2     # ... on the second board
 npm run validate -- -v            # print the solved pull order
 npm run inspect                   # the board layer by layer
 npm run joints                    # every crossing, and what each screw holds
+npm run tune -- --level 2         # re-solve level 2's receiver order
 npm run tune                      # search receiver stacks for a target difficulty
 npm run tune -- --colours         # solve the pocket-colour graph
 ```
@@ -135,6 +137,31 @@ because you decided to take it off rather than as a side effect.
 The four `over` planks are reachable straight away; the three underneath wait
 for whatever is lying on them. **7 of 12 pulls spill nothing at all** — they only
 change the structure.
+
+## LEVEL 2 — "SCAFFOLD", the hard one
+
+**8 planks, 15 screws, 10 crossings, 45 marbles.** Same three rules, same
+machine checks. What changes is the pressure:
+
+- **A quarter more stock through a buffer that did not grow.** 45 marbles, still
+  a 24 belt.
+- **The middle rail is last, and its colour is trapped with it.** All five pieces
+  on the top layer cross `railMid`, so it is the last plank on the board — and
+  because they all cross it, none of them may share its colour. That forces its
+  nine BLUE to be the entire blue supply: three boxes that cannot be touched
+  until the board is nearly bare.
+- **Five planks are free at the first tap**, not four, and none of them is the
+  one you want.
+
+Level 1's best possible play peaks at 12/24 and its verified play-through at
+18/24. Level 2 peaks at **21/24** in the model and **23/24** on real physics —
+one marble of slack. A level allowed to run that tight has to say so: `LevelDef`
+carries a `peakBudget`, and the validator holds each board to its own, rather
+than quietly loosening the rule for everybody.
+
+Finding it took the tuner three tries at the structure. 54 marbles with three
+twelve-marble pours is not winnable at all — 116 model-approved receiver
+orderings were played through the real physics and every one of them lost.
 
 ### Gravity decides which way a stick swings
 
@@ -341,7 +368,7 @@ colour that had not arrived yet. `npm run tune` now plays every shortlisted
 candidate through the real simulation before proposing it: in the last search,
 **63 of 240 model-approved stacks lost for real.**
 
-**119 assertions.** The load-bearing ones are the two that keep the picture and
+**120 assertions on level 1, 135 on level 2.** The load-bearing ones are the two that keep the picture and
 the rules saying the same thing:
 
 - **every crossing is pinned** — two planks may not lie across each other with
@@ -399,7 +426,7 @@ src/game/MarbleDriver.ts     driver interface + headless driver + the shared ass
 src/physics/RapierDriver.ts  real 3D rigid bodies
 src/game/Game.ts             glue: model -> views -> feel
 src/three/*.ts               renderer, board + planks, track, marbles, receivers, particles
-scripts/validate.mjs         119 assertions + solver + play-through
+scripts/validate.mjs         every rule + solver + play-through, per level
 scripts/joints.mjs           every crossing, and what each screw holds
 scripts/tune.mjs             receiver-stack + pocket-colour search
 scripts/inspect.mjs          board layer by layer

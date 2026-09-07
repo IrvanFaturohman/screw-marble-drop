@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { LAYOUT, TUNING } from '../config/GameConfig';
-import { LEVEL_1 } from '../config/LevelConfig';
+import { LEVELS } from '../config/LevelConfig';
 import { GameModel } from './GameModel';
 import { RapierDriver } from '../physics/RapierDriver';
 import { World } from '../three/World';
@@ -39,7 +39,7 @@ export class Game {
 
   constructor(private stage: HTMLElement) {
     this.world = new World(stage);
-    this.hud = new Hud(() => this.restart());
+    this.hud = new Hud(() => this.advance());
   }
 
   async start() {
@@ -53,13 +53,18 @@ export class Game {
     this.raf = requestAnimationFrame(loop);
   }
 
+  /** Index into LEVELS. Winning advances it; losing replays the same board. */
+  private levelIndex = 0;
+  get level() { return LEVELS[this.levelIndex]; }
+
   private async build() {
-    const driver = await RapierDriver.create(LEVEL_1);
-    this.model = new GameModel(LEVEL_1, driver);
+    const level = this.level;
+    const driver = await RapierDriver.create(level);
+    this.model = new GameModel(level, driver);
     this.ended = false;
 
     this.structure = new StructureView(this.model);
-    this.track = new TrackView(this.model, LEVEL_1);
+    this.track = new TrackView(this.model, level);
     this.marbles = new MarbleView(this.model);
     this.receivers = new ReceiverView(this.model);
     this.juice = new Juice();
@@ -67,6 +72,7 @@ export class Game {
     this.world.root.add(this.structure.group, this.track.group, this.receivers.group, this.marbles.mesh, this.juice.points);
     this.wireEvents();
     this.hud.reset();
+    this.hud.setLevel(this.levelIndex + 1, LEVELS.length, level.name);
 
     debugPanel.attach({
       restart: () => this.restart(),
@@ -254,7 +260,22 @@ export class Game {
     this.ended = true;
     if (won) { audio.win(); haptics.win(); this.juice.celebrate(); /* the sculpture has already dismantled itself */ }
     else { audio.fail(); haptics.fail(); this.world.shake(1.4, 260); }
-    setTimeout(() => this.hud.showOverlay(won, this.model), won ? 500 : 340);
+    const more = won && this.levelIndex < LEVELS.length - 1;
+    setTimeout(() => this.hud.showOverlay(won, this.model, {
+      level: this.levelIndex + 1, total: LEVELS.length, name: this.level.name, more,
+    }), won ? 500 : 340);
+  }
+
+  /** Win -> next board. Lose -> the same one again. */
+  advance(): Promise<void> {
+    if (this.model.phase === 'won' && this.levelIndex < LEVELS.length - 1) this.levelIndex++;
+    return this.restart();
+  }
+
+  /** Jump straight to a board, 1-based. For the debug harness. */
+  goToLevel(n: number): Promise<void> {
+    this.levelIndex = Math.max(0, Math.min(LEVELS.length - 1, n - 1));
+    return this.restart();
   }
 
   /** Returns once the new scene is built, so a test can act on it immediately. */

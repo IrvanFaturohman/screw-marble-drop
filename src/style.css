@@ -166,3 +166,11 @@ html, body {
 .dbg-foot { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px; border-top: 1px solid #3a4152; align-items: center; }
 .dbg-foot button { background: #232838; color: #e6ebf2; border: 1px solid #3a4152; border-radius: 6px; padding: 4px 8px; font-size: 11px; cursor: pointer; }
 .dbg-foot button:hover { background: #2e3547; }
+
+/* Which board you are on. Small and out of the way — it matters between
+   attempts, never during one. */
+.hud-level {
+  position: absolute; top: 6.4%; left: 0; right: 0;
+  text-align: center; font-size: 11px; letter-spacing: 0.09em;
+  color: rgba(58, 50, 37, 0.5); font-weight: bold;
+}

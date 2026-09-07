@@ -19,10 +19,29 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const TRIALS = Number(process.argv[2] ?? 4000);
+// First bare number wins; `--level N` must not be mistaken for the trial count.
+const TRIALS = (() => {
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--level') { i++; continue; }
+    if (args[i].startsWith('--')) continue;
+    const n = Number(args[i]);
+    if (Number.isFinite(n)) return n;
+  }
+  return 4000;
+})();
 const out = join(mkdtempSync(join(tmpdir(), 'smd-')), 'h.mjs');
 await build({ entryPoints: ['src/game/headless.ts'], bundle: true, format: 'esm', platform: 'node', target: 'node18', outfile: out, logLevel: 'error' });
-const { LEVEL_1, TUNING, GameModel, SourceModel, RapierDriver } = await import(pathToFileURL(out).href);
+const { LEVELS, TUNING, GameModel, SourceModel, RapierDriver } = await import(pathToFileURL(out).href);
+
+/** Which level. `--level 2` / `--level=2`; defaults to the first. */
+const LEVEL_NO = (() => {
+  const i = process.argv.indexOf('--level');
+  const eq = process.argv.find((a) => a.startsWith('--level='));
+  const n = Number(i >= 0 ? process.argv[i + 1] : eq ? eq.split('=')[1] : 1);
+  return Number.isFinite(n) && n >= 1 && n <= LEVELS.length ? n : 1;
+})();
+const LEVEL = LEVELS[LEVEL_NO - 1];
 
 const CAP = TUNING.CONVEYOR_CAPACITY;
 const RCAP = TUNING.RECEIVER_CAPACITY;
@@ -32,11 +51,11 @@ const COLORS = ['red', 'blue', 'yellow', 'green'];
 // Which screws hold which plank is DERIVED from geometry, and a screw at a
 // crossing holds two planks at once — so the model has to be built from a real
 // SourceModel rather than from lists in the level file.
-const probe = new SourceModel(LEVEL_1);
+const probe = new SourceModel(LEVEL);
 const plates = probe.plates.map((p, i) => ({
   i, id: p.id, initial: p.screws.length, z: p.z,
   hasPartial: p.def.partial !== 'none',
-  pockets: LEVEL_1.pockets.filter((k) => k.plate === p.id),
+  pockets: LEVEL.pockets.filter((k) => k.plate === p.id),
 }));
 const plateIdx = new Map(plates.map((p) => [p.id, p.i]));
 const screws = probe.screws.map((s, i) => ({
@@ -151,10 +170,10 @@ function minPeakOrder(stacks, ceiling = CAP) {
  */
 // One Rapier world, reused across candidates — the static scene comes from the
 // planks, not from the receiver stacks, so it never needs rebuilding.
-const realDriver = await RapierDriver.create(LEVEL_1);
+const realDriver = await RapierDriver.create(LEVEL);
 
 function realPlay(stacks, order) {
-  const level = { ...LEVEL_1, receiverStacks: stacks };
+  const level = { ...LEVEL, receiverStacks: stacks };
   realDriver.reset();
   const g = new GameModel(level, realDriver);
   const settled = () =>
@@ -190,9 +209,9 @@ function realPlay(stacks, order) {
  */
 if (process.argv.includes('--colours')) {
   const { SourceModel, containsWorld } = await import(pathToFileURL(out).href);
-  const srcM = new SourceModel(LEVEL_1);
+  const srcM = new SourceModel(LEVEL);
   // Sample each plate and record which other plates overlap it.
-  const adj = new Map(LEVEL_1.plates.map((p) => [p.id, new Set()]));
+  const adj = new Map(LEVEL.plates.map((p) => [p.id, new Set()]));
   const N = 26;
   for (const a of srcM.plates) {
     const bb = SourceModel.bounds(a);
@@ -211,7 +230,7 @@ if (process.argv.includes('--colours')) {
       }
     }
   }
-  const pk = LEVEL_1.pockets.map((k) => ({ id: k.id, plate: k.plate, count: k.count }));
+  const pk = LEVEL.pockets.map((k) => ({ id: k.id, plate: k.plate, count: k.count }));
   const n = pk.length;
   const results = [];
   const assign = new Array(n);
@@ -250,22 +269,49 @@ if (process.argv.includes('--colours')) {
 
 // ---- the search -----------------------------------------------------------
 const supply = {};
-for (const k of LEVEL_1.pockets) supply[k.color] = (supply[k.color] ?? 0) + k.count;
+for (const k of LEVEL.pockets) supply[k.color] = (supply[k.color] ?? 0) + k.count;
 const boxes = [];
 for (const c of COLORS) for (let i = 0; i < (supply[c] ?? 0) / RCAP; i++) boxes.push(c);
 const perCol = boxes.length / 3;
 console.log(`\nsupply ${JSON.stringify(supply)} -> ${boxes.length} boxes (${boxes.length / 3} per column)`);
 if (!Number.isInteger(perCol)) { console.log('boxes do not divide into 3 columns'); process.exit(1); }
 
-const current = minPeak(LEVEL_1.receiverStacks);
+const current = minPeak(LEVEL.receiverStacks);
 console.log(`current stacks: best play peaks at ${current}/${CAP}\n`);
 
 let rng = 12345;
 const rand = () => ((rng = (rng * 1664525 + 1013904223) >>> 0) / 4294967296);
-const shuffled = () => {
-  const a = boxes.slice();
+/**
+ * `LAST_COLOR` pins a colour to the BOTTOM of every column.
+ *
+ * A colour that lives on one plank, and that plank is the last one off the
+ * board, cannot be served before then — so a column that asks for it early is
+ * simply dead, and everything else piles up behind it. Level 2 is built on
+ * exactly that (blue exists only on `railMid`), so its blue boxes have to be
+ * the finale rather than a random draw.
+ */
+const LAST_COLOR = process.env.LAST_COLOR || '';
+const HEAD_DISTINCT = Number(process.env.HEAD_DISTINCT ?? (LAST_COLOR ? 2 : 3));
+const shuffle = (a) => {
   for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
-  return [a.slice(0, perCol), a.slice(perCol, perCol * 2), a.slice(perCol * 2)];
+  return a;
+};
+const shuffled = () => {
+  if (!LAST_COLOR) {
+    const a = shuffle(boxes.slice());
+    return [a.slice(0, perCol), a.slice(perCol, perCol * 2), a.slice(perCol * 2)];
+  }
+  const late = shuffle(boxes.filter((c) => c === LAST_COLOR));
+  const rest = shuffle(boxes.filter((c) => c !== LAST_COLOR));
+  const cols = [[], [], []];
+  // Deal the late colour onto the bottoms first, then fill upward.
+  for (let i = 0; i < late.length; i++) cols[i % 3].push(late[i]);
+  for (let i = 0, c = 0; i < rest.length; i++) {
+    while (cols[c % 3].length >= perCol) c++;
+    cols[c % 3].unshift(rest[i]);
+    c++;
+  }
+  return cols;
 };
 
 /**
@@ -286,15 +332,21 @@ for (let t = 0; t < TRIALS && Date.now() - t0 < 90000; t++) {
   // and NO green destination anywhere on the board.
   const head = s.map((c) => c[0]);
   if (head.includes('green')) continue;
-  if (new Set(head).size !== 3) continue;
+  // Normally the opening row shows three different colours. With a colour
+  // pinned to the bottom (see LAST_COLOR) only two remain for the heads, and an
+  // opening that can only serve two of four is part of what makes it hard.
+  if (new Set(head).size < HEAD_DISTINCT) continue;
   tried++;
   const { peak, order } = minPeakOrder(s);
   if (peak === Infinity) continue;
-  const sc = score(peak);
-  if (sc <= 1) shortlist.push({ stacks: s, peak, order, sc });
+  // Shortlist on SOLVABILITY only, never on the band. The count model routinely
+  // reads 9 where the real physics reads 21, so filtering the shortlist by the
+  // target band throws away every candidate that would actually have hit it.
+  // The band is applied to the real peak, further down.
+  shortlist.push({ stacks: s, peak, order, sc: 0 });
   if (shortlist.length >= 240) break;
 }
-shortlist.sort((a, b) => a.sc - b.sc || b.peak - a.peak);
+shortlist.sort((a, b) => b.peak - a.peak);
 
 // Now the part that actually decides it: play each shortlisted stack through the
 // shipping simulation. The count model is a filter, never the verdict.
@@ -316,7 +368,7 @@ for (const c of shortlist) {
 console.log(`\n${tried} candidates tried, ${shortlist.length} shortlisted, ${verified} played for real, ${won} actually won`);
 console.log(`chosen: real peak ${bestPeak}/${CAP} (target ${TARGET_LO}-${TARGET_HI})`);
 if (best) {
-  console.log('\npaste into LEVEL_1.receiverStacks:\n');
+  console.log('\npaste into LEVEL.receiverStacks:\n');
   console.log('  receiverStacks: [');
   for (const col of best) console.log(`    [${col.map((c) => `'${c}'`).join(', ')}],`);
   console.log('  ],');

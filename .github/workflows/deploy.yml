@@ -32,6 +32,7 @@ jobs:
       # search and a full play-through on the real Rapier physics. A board whose
       # crossings are not all pinned must not reach the page.
       - run: npm run validate
+      - run: npm run validate -- --level 2
       - run: npm run build
       - uses: actions/upload-pages-artifact@v3
         with:

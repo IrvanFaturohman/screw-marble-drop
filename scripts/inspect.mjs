@@ -14,18 +14,27 @@ import { join } from 'node:path';
 
 const out = join(mkdtempSync(join(tmpdir(), 'smd-')), 'h.mjs');
 await build({ entryPoints: ['src/game/headless.ts'], bundle: true, format: 'esm', platform: 'node', target: 'node18', outfile: out, logLevel: 'error' });
-const { SourceModel, SortingModel, LEVEL_1, TUNING, LAYOUT, HALF_W, colorSupply, colorDemand, shapeBox, shapeBoxRot } =
+const { SourceModel, SortingModel, LEVELS, TUNING, LAYOUT, HALF_W, colorSupply, colorDemand, shapeBox, shapeBoxRot } =
   await import(pathToFileURL(out).href);
 
+/** Which level. `--level 2` / `--level=2`; defaults to the first. */
+const LEVEL_NO = (() => {
+  const i = process.argv.indexOf('--level');
+  const eq = process.argv.find((a) => a.startsWith('--level='));
+  const n = Number(i >= 0 ? process.argv[i + 1] : eq ? eq.split('=')[1] : 1);
+  return Number.isFinite(n) && n >= 1 && n <= LEVELS.length ? n : 1;
+})();
+const LEVEL = LEVELS[LEVEL_NO - 1];
+
 const C = { g: '\x1b[32m', r: '\x1b[31m', y: '\x1b[33m', d: '\x1b[90m', x: '\x1b[0m', b: '\x1b[1m' };
-const src = new SourceModel(LEVEL_1);
-const sorting = new SortingModel(LEVEL_1.receiverStacks);
+const src = new SourceModel(LEVEL);
+const sorting = new SortingModel(LEVEL.receiverStacks);
 
 console.log(`\n${C.b}PLATES${C.x}  (front to back)`);
 for (const p of [...src.plates].sort((a, b) => b.z - a.z)) {
   const box = shapeBox(p.def.shape);
   const blocks = [...(p.def.blocksAtPartial ?? []).map((s) => s + '@partial'), ...(p.def.blocksUntilGone ?? []).map((s) => s + '@gone')];
-  const pk = LEVEL_1.pockets.filter((x) => x.plate === p.id).map((x) => `${x.color}x${x.count}@${x.releaseAt}`);
+  const pk = LEVEL.pockets.filter((x) => x.plate === p.id).map((x) => `${x.color}x${x.count}@${x.releaseAt}`);
   console.log(`  z${String(p.z).padStart(5)} ${p.id.padEnd(10)} ${p.def.shape.kind.padEnd(6)} ` +
     `${p.screws.length}sup [${p.screws.map((s) => s.id).join(',').padEnd(26)}] ` +
     `y ${(p.def.y + box.minY).toFixed(1).padStart(5)}..${(p.def.y + box.maxY).toFixed(1).padEnd(5)}`);
@@ -43,7 +52,7 @@ for (const s of src.screws) {
 
 console.log(`\n${C.b}REVEAL WAVES${C.x}  (what one pull opens up)`);
 {
-  const probe = new SourceModel(LEVEL_1);
+  const probe = new SourceModel(LEVEL);
   const settle = () => { for (let i = 0; i < 700; i++) probe.update(1 / 120); };
   let wave = 0;
   while (probe.accessible().length && wave++ < 20) {
@@ -62,13 +71,13 @@ console.log(`\n${C.b}REVEAL WAVES${C.x}  (what one pull opens up)`);
 }
 
 console.log(`\n${C.b}POCKETS${C.x}`);
-for (const p of LEVEL_1.pockets) {
+for (const p of LEVEL.pockets) {
   console.log(`  ${p.id.padEnd(10)} ${p.color.padEnd(6)} x${String(p.count).padStart(2)} ${p.kind.padEnd(13)} on ${p.plate.padEnd(10)} @${p.releaseAt}`);
 }
 
 console.log(`\n${C.b}COLOUR BALANCE${C.x}`);
 {
-  const sup = colorSupply(LEVEL_1), dem = colorDemand(LEVEL_1);
+  const sup = colorSupply(LEVEL), dem = colorDemand(LEVEL);
   for (const k of new Set([...Object.keys(sup), ...Object.keys(dem)])) {
     const ok = (sup[k] ?? 0) === (dem[k] ?? 0);
     console.log(`  ${k.padEnd(7)} supply ${String(sup[k] ?? 0).padStart(3)}  demand ${String(dem[k] ?? 0).padStart(3)}  ${ok ? C.g + 'ok' : C.r + 'MISMATCH'}${C.x}`);
@@ -78,11 +87,11 @@ console.log(`\n${C.b}COLOUR BALANCE${C.x}`);
 }
 
 console.log(`\n${C.b}RECEIVER STACKS${C.x}  (top = live)`);
-LEVEL_1.receiverStacks.forEach((col, i) => {
+LEVEL.receiverStacks.forEach((col, i) => {
   console.log(`  col ${'ABC'[i]}  ${col.map((c, j) => (j === 0 ? C.b : C.d) + c[0].toUpperCase() + C.x).join(' ')}`);
 });
 {
-  const open0 = LEVEL_1.receiverStacks.map((c) => c[0]);
+  const open0 = LEVEL.receiverStacks.map((c) => c[0]);
   console.log(`  exposed at t=0: ${open0.join(', ')}   ${open0.includes('green') ? C.r + 'green available — no trap!' : C.g + 'no green destination (the trap)'}${C.x}`);
 }
 

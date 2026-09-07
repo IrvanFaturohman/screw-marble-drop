@@ -59,6 +59,10 @@ const harness = {
   },
   /** Await it: the scene is rebuilt asynchronously. */
   restart() { return game.restart(); },
+  /** Win -> next board, lose -> the same one again. Await it. */
+  advance() { return game.advance(); },
+  /** Jump straight to a board, 1-based. Await it. */
+  level(n: number) { return game.goToLevel(n); },
   tuning: TUNING,
   debugPanel,
 };

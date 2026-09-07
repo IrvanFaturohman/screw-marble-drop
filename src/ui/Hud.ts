@@ -1,5 +1,6 @@
 import { COLORS, TUNING } from '../config/GameConfig';
 import type { GameModel } from '../game/GameModel';
+import { LEVELS } from '../config/LevelConfig';
 import { audio } from '../services';
 
 /**
@@ -13,6 +14,7 @@ export class Hud {
   private bar: HTMLElement;
   private belt: HTMLElement;
   private beltFill: HTMLElement;
+  private levelTag!: HTMLElement;
   private hint: HTMLElement;
   private overlay: HTMLElement;
   private debug: HTMLElement;
@@ -29,6 +31,7 @@ export class Hud {
         <button id="hud-mute" aria-label="mute">${audio.muted ? '🔇' : '🔊'}</button>
       </div>
       <div id="hud-belt" class="hud-belt"><span id="hud-belt-txt">0/24</span><i id="hud-belt-fill"></i></div>
+      <div id="hud-level" class="hud-level"></div>
       <div id="hud-hint" class="hud-hint"></div>
       <pre id="hud-debug" class="hud-debug hidden"></pre>
       <div id="hud-overlay" class="hud-overlay hidden"></div>
@@ -38,6 +41,7 @@ export class Hud {
     this.bar = document.getElementById('hud-bar')!;
     this.belt = document.getElementById('hud-belt')!;
     this.beltFill = document.getElementById('hud-belt-fill')!;
+    this.levelTag = document.getElementById('hud-level')!;
     this.hint = document.getElementById('hud-hint')!;
     this.debug = document.getElementById('hud-debug')!;
     this.overlay = document.getElementById('hud-overlay')!;
@@ -46,6 +50,11 @@ export class Hud {
       audio.init();
       (e.currentTarget as HTMLElement).textContent = audio.toggleMute() ? '🔇' : '🔊';
     });
+  }
+
+  /** Which board this is. Named, because the two play very differently. */
+  setLevel(n: number, total: number, name: string) {
+    this.levelTag.textContent = `LEVEL ${n}/${total} · ${name}`;
   }
 
   reset() {
@@ -89,15 +98,17 @@ export class Hud {
     if (debugText !== null) this.debug.textContent = debugText;
   }
 
-  showOverlay(won: boolean, m: GameModel) {
+  showOverlay(won: boolean, m: GameModel, lv?: { level: number; total: number; name: string; more: boolean }) {
+    const title = won ? (lv?.more ? `LEVEL ${lv.level} CLEAR` : 'ALL LEVELS CLEAR') : 'CONVEYOR FULL';
+    const cta = won ? (lv?.more ? `NEXT: ${LEVELS[lv.level].name}` : 'PLAY AGAIN') : 'RETRY';
     this.overlay.classList.remove('hidden');
     this.overlay.innerHTML = `
       <div class="panel ${won ? 'win' : 'lose'}">
-        <h1>${won ? 'LEVEL COMPLETE' : 'CONVEYOR FULL'}</h1>
+        <h1>${title}</h1>
         <p>${won
           ? `${m.taps} taps · ${m.sorting.boxesTotal} boxes packed`
           : 'a batch poured with nowhere left to put it'}</p>
-        <button id="hud-restart">${won ? 'PLAY AGAIN' : 'RESTART'}</button>
+        <button id="hud-restart">${cta}</button>
       </div>`;
     const btn = document.getElementById('hud-restart')!;
     btn.addEventListener('click', (e) => { e.stopPropagation(); this.onRestart(); });

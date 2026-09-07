@@ -160,6 +160,13 @@ export interface LevelDef {
   pockets: PocketDef[];
   receiverStacks: MarbleColor[][];
   guides: GuideDef[];
+  /**
+   * How close to the conveyor cap the BEST possible play is allowed to run, as
+   * a fraction of capacity. A level that cannot be misplayed is not a puzzle, so
+   * this is capped — but a level billed as hard is allowed to run tighter, and
+   * says so here rather than the validator quietly loosening for everyone.
+   */
+  peakBudget?: number;
 }
 
 // --------------------------------------------------------------------- level ---
@@ -359,7 +366,137 @@ export const LEVEL_1: LevelDef = {
   ],
 };
 
-export const LEVELS: LevelDef[] = [LEVEL_1];
+/**
+ * LEVEL 2 — "SCAFFOLD". The hard one.
+ *
+ * Same three rules as LEVEL 1, enforced the same way: every crossing pinned, no
+ * plank sandwiched, nothing buried. What changes is the pressure.
+ *
+ *   54 MARBLES ON THE SAME 24 BELT. Half again as much stock through a buffer
+ *   that did not grow.
+ *
+ *   THE MIDDLE RAIL IS LAST, AND ITS COLOUR IS TRAPPED WITH IT. Every one of the
+ *   five pieces on the top layer crosses `railMid`, so it is the last plank on
+ *   the board. And because every one of them crosses it, none of them may share
+ *   its colour — which forces its twelve BLUE to be the entire blue supply.
+ *   Four blue boxes that cannot be touched until the board is nearly bare.
+ *
+ *   TWELVE IN ONE POUR. Each rail carries a full twelve, half the belt at once,
+ *   and a rail only pours when its last screw is out.
+ */
+const L2_TOP = 32, L2_MID = 24, L2_LOW = 16;
+const L2_UA = -13, L2_UB = -7, L2_UC = 3, L2_UD = 15;   // the four uprights
+const L2_DA = pt(7.5, 13), L2_DB = pt(10.5, 25);        // the one diagonal
+
+export const LEVEL_2: LevelDef = {
+  id: 'scaffold',
+  name: 'SCAFFOLD',
+  // Hard on purpose: the best possible play still fills 7/8 of the belt.
+  peakBudget: 0.9,
+
+  plates: [
+    // --- top layer: four uprights and a diagonal, none of which touch each
+    //     other, so all five are free from the first tap ---
+    {
+      id: 'diag', z: 1.5,
+      ...stick(L2_DA, L2_DB, { w: PLANK_W, over: 1.2 }),
+      partial: 'rotateAroundRemaining', partialDeg: 18,
+      release: 'fallAway',
+    },
+    {
+      id: 'upA', z: 1.44,
+      ...stick(pt(L2_UA, L2_MID), pt(L2_UA, L2_TOP), { w: PLANK_W, over: 1.6 }),
+      partial: 'rotateAroundRemaining', partialDeg: 16,
+      release: 'swingOpen', releaseDeg: -80, releasePivot: { x: L2_UA, y: L2_TOP },
+    },
+    {
+      id: 'upB', z: 1.38,
+      ...stick(pt(L2_UB, L2_LOW), pt(L2_UB, L2_MID), { w: PLANK_W, over: 1.6 }),
+      partial: 'rotateAroundRemaining', partialDeg: -16,
+      release: 'fallAway',
+    },
+    {
+      id: 'upC', z: 1.32,
+      ...stick(pt(L2_UC, L2_LOW), pt(L2_UC, L2_MID), { w: PLANK_W, over: 1.6 }),
+      partial: 'rotateAroundRemaining', partialDeg: 16,
+      release: 'fallAway',
+    },
+    {
+      id: 'upD', z: 1.26,
+      ...stick(pt(L2_UD, L2_MID), pt(L2_UD, L2_TOP), { w: PLANK_W, over: 1.6 }),
+      partial: 'rotateAroundRemaining', partialDeg: -16,
+      release: 'fallAway',
+    },
+
+    // --- bottom layer: three rails lying flat. `railMid` is crossed by all
+    //     five pieces above, so nothing frees it until they have all gone ---
+    {
+      id: 'railTop', z: 0.0,
+      ...stick(pt(-16, L2_TOP), pt(16, L2_TOP), { w: PLANK_W, over: 0 }),
+      partial: 'tiltAroundRemaining', partialDeg: 12,
+      release: 'fallAway',
+    },
+    {
+      id: 'railMid', z: 0.06,
+      ...stick(pt(-15, L2_MID), pt(16, L2_MID), { w: PLANK_W, over: 0 }),
+      partial: 'tiltAroundRemaining', partialDeg: 12,
+      release: 'fallAway',
+    },
+    {
+      id: 'railLow', z: 0.12,
+      ...stick(pt(-15, L2_LOW), pt(13, L2_LOW), { w: PLANK_W, over: 0 }),
+      partial: 'tiltAroundRemaining', partialDeg: 12,
+      release: 'fallAway',
+    },
+  ],
+
+  // Ten joints plus one private screw per top-layer piece, so nothing comes off
+  // as a side effect of freeing something else. Proved by `npm run joints`.
+  screws: [
+    { id: 's2aTop', plate: 'upA', x: L2_UA, y: L2_TOP },
+    { id: 's2aMid', plate: 'upA', x: L2_UA, y: L2_MID },
+    { id: 's2bMid', plate: 'upB', x: L2_UB, y: L2_MID },
+    { id: 's2bLow', plate: 'upB', x: L2_UB, y: L2_LOW },
+    { id: 's2cMid', plate: 'upC', x: L2_UC, y: L2_MID },
+    { id: 's2cLow', plate: 'upC', x: L2_UC, y: L2_LOW },
+    { id: 's2dTop', plate: 'upD', x: L2_UD, y: L2_TOP },
+    { id: 's2dMid', plate: 'upD', x: L2_UD, y: L2_MID },
+    { id: 's2gLow', plate: 'diag', x: 8.25, y: L2_LOW },
+    { id: 's2gMid', plate: 'diag', x: 10.25, y: L2_MID },
+
+    { id: 's2aOwn', plate: 'upA', x: L2_UA, y: 28 },
+    { id: 's2bOwn', plate: 'upB', x: L2_UB, y: 20 },
+    { id: 's2cOwn', plate: 'upC', x: L2_UC, y: 20 },
+    { id: 's2dOwn', plate: 'upD', x: L2_UD, y: 28 },
+    { id: 's2gOwn', plate: 'diag', x: 9.25, y: 20 },
+  ],
+
+  // 54 marbles. BLUE exists only on `railMid`, the last plank on the board.
+  pockets: [
+    { id: 'p2Top', color: 'red', count: 9, kind: 'tray', plate: 'railTop', releaseAt: 'detached', x: -2, y: L2_TOP, cols: 9, spacing: 2.1 },
+    { id: 'p2Mid', color: 'blue', count: 9, kind: 'tray', plate: 'railMid', releaseAt: 'detached', x: -2, y: L2_MID, cols: 9, spacing: 2.1 },
+    { id: 'p2Low', color: 'yellow', count: 9, kind: 'pocketBehind', plate: 'railLow', releaseAt: 'detached', x: -1, y: L2_LOW, cols: 9, spacing: 2.1 },
+    { id: 'p2Diag', color: 'green', count: 6, kind: 'wedge', plate: 'diag', releaseAt: 'partial', x: (L2_DA.x + L2_DB.x) / 2, y: (L2_DA.y + L2_DB.y) / 2, cols: 6, spacing: 2.1 },
+    { id: 'p2UpA', color: 'green', count: 3, kind: 'rotatingCup', plate: 'upA', releaseAt: 'detached', x: L2_UA, y: 30, cols: 3, spacing: 2.1 },
+    { id: 'p2UpB', color: 'red', count: 3, kind: 'rotatingCup', plate: 'upB', releaseAt: 'detached', x: L2_UB, y: 18, cols: 3, spacing: 2.1 },
+    { id: 'p2UpC', color: 'red', count: 3, kind: 'rotatingCup', plate: 'upC', releaseAt: 'detached', x: L2_UC, y: 18, cols: 3, spacing: 2.1 },
+    { id: 'p2UpD', color: 'yellow', count: 3, kind: 'hopper', plate: 'upD', releaseAt: 'detached', x: L2_UD, y: 30, cols: 3, spacing: 2.1 },
+  ],
+
+  // 18 boxes x 3 = 54. Re-solved by `npm run tune -- --level 2`.
+  receiverStacks: [
+    ['yellow', 'red', 'red', 'blue', 'yellow'],
+    ['red', 'green', 'red', 'red', 'green'],
+    ['blue', 'green', 'yellow', 'blue', 'yellow'],
+  ],
+
+  guides: [
+    { id: 'gL', x: -12.6, y: 3.4, w: 17.5, h: 0.85, rot: -0.44 },
+    { id: 'gR', x: 12.6, y: 3.4, w: 17.5, h: 0.85, rot: 0.44 },
+  ],
+};
+
+export const LEVELS: LevelDef[] = [LEVEL_1, LEVEL_2];
 
 // ------------------------------------------------------------- derivations ---
 

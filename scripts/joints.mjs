@@ -24,10 +24,19 @@ await build({
   bundle: true, format: 'esm', platform: 'node', target: 'node18',
   outfile: out, logLevel: 'error',
 });
-const { SourceModel, LEVEL_1, LAYOUT, containsWorld, shapeBoxRot } = await import(pathToFileURL(out).href);
+const { SourceModel, LEVELS, LAYOUT, containsWorld, shapeBoxRot } = await import(pathToFileURL(out).href);
+
+/** Which level. `--level 2` / `--level=2`; defaults to the first. */
+const LEVEL_NO = (() => {
+  const i = process.argv.indexOf('--level');
+  const eq = process.argv.find((a) => a.startsWith('--level='));
+  const n = Number(i >= 0 ? process.argv[i + 1] : eq ? eq.split('=')[1] : 1);
+  return Number.isFinite(n) && n >= 1 && n <= LEVELS.length ? n : 1;
+})();
+const LEVEL = LEVELS[LEVEL_NO - 1];
 
 const C = { b: '\x1b[1m', x: '\x1b[0m', g: '\x1b[32m', r: '\x1b[31m', d: '\x1b[90m' };
-const src = new SourceModel(LEVEL_1);
+const src = new SourceModel(LEVEL);
 const rest = (p) => ({ x: p.def.x, y: p.def.y, rot: p.def.rot ?? 0, pivotX: p.def.x, pivotY: p.def.y, angle: 0, dx: 0, dy: 0 });
 const inside = (p, x, y, pad = 0) => containsWorld(p.def.shape, rest(p), x, y, pad);
 

@@ -27,10 +27,20 @@ await build({
   outfile: out, logLevel: 'error',
 });
 const M = await import(pathToFileURL(out).href);
+
 const {
-  GameModel, SourceModel, SortingModel, LEVEL_1, TUNING, LAYOUT, HALF_W,
+  GameModel, SourceModel, SortingModel, LEVELS, TUNING, LAYOUT, HALF_W,
   colorSupply, colorDemand, pocketSlot, containsWorld, shapeBox, shapeBoxRot, toLocal, RapierDriver,
 } = M;
+
+/** Which level. `--level 2` / `--level=2`; defaults to the first. */
+const LEVEL_NO = (() => {
+  const i = process.argv.indexOf('--level');
+  const eq = process.argv.find((a) => a.startsWith('--level='));
+  const n = Number(i >= 0 ? process.argv[i + 1] : eq ? eq.split('=')[1] : 1);
+  return Number.isFinite(n) && n >= 1 && n <= LEVELS.length ? n : 1;
+})();
+const LEVEL = LEVELS[LEVEL_NO - 1];
 
 let failures = 0;
 const pass = [];
@@ -45,9 +55,9 @@ const CAP = TUNING.CONVEYOR_CAPACITY;
 const RCAP = TUNING.RECEIVER_CAPACITY;
 
 console.log(`\n${C.b}SCREW MARBLE DROP — level validator${C.x}`);
-console.log(`level: ${LEVEL_1.id} "${LEVEL_1.name}"  —  ${LEVEL_1.plates.length} plates, ${LEVEL_1.screws.length} screws, ${LEVEL_1.pockets.length} pockets\n`);
+console.log(`level: ${LEVEL.id} "${LEVEL.name}"  —  ${LEVEL.plates.length} plates, ${LEVEL.screws.length} screws, ${LEVEL.pockets.length} pockets\n`);
 
-const src = new SourceModel(LEVEL_1);
+const src = new SourceModel(LEVEL);
 const plateOf = (id) => src.plateById.get(id);
 
 // ------------------------------------------------------- structural shape ---
@@ -58,8 +68,8 @@ console.log(`${C.b}STRUCTURE${C.x}`);
 {
   let overlaps = 0;
   const N = 60;
-  const covers = new Map(LEVEL_1.plates.map((p) => [p.id, new Set()]));
-  const near = new Map(LEVEL_1.plates.map((p) => [p.id, new Set()]));
+  const covers = new Map(LEVEL.plates.map((p) => [p.id, new Set()]));
+  const near = new Map(LEVEL.plates.map((p) => [p.id, new Set()]));
   for (const a of src.plates) {
     const ba = shapeBoxRot(a.def.shape, a.def.rot ?? 0);
     for (let i = 0; i < N; i++) {
@@ -96,7 +106,7 @@ console.log(`${C.b}STRUCTURE${C.x}`);
   // be confused with the one in front. (coreDisc and cradle sit 0.5 apart, and
   // both being red merged them into a single shape.)
   const tintOfP = (id) => {
-    const pk = LEVEL_1.pockets.find((x) => x.plate === id);
+    const pk = LEVEL.pockets.find((x) => x.plate === id);
     return pk ? pk.color : 'neutral';
   };
   const seenPair = new Set();
@@ -112,12 +122,12 @@ console.log(`${C.b}STRUCTURE${C.x}`);
   console.log(`  ${seenPair.size} depth-adjacent overlapping pairs, all colour-separated`);
 
   // A grid of identical containers is the exact failure mode being designed out.
-  const sig = new Set(LEVEL_1.plates.map((p) => JSON.stringify(p.shape)));
+  const sig = new Set(LEVEL.plates.map((p) => JSON.stringify(p.shape)));
   check('plates are not all the same shape', sig.size >= 4, `only ${sig.size} distinct shapes`);
   // A woven lattice is bars by design, and the failure the brief calls out is a
   // plate wide enough to read as a marble box. Every piece must read as a STICK,
   // and their lengths must vary or the board is just a bundle.
-  const aspects = LEVEL_1.plates.map((p) => {
+  const aspects = LEVEL.plates.map((p) => {
     const b = shapeBox(p.shape);
     return (b.maxX - b.minX) / (b.maxY - b.minY);
   });
@@ -126,15 +136,15 @@ console.log(`${C.b}STRUCTURE${C.x}`);
   // cross-pieces is a short plank, not a slab, so the bar sits just above that.
   check('every plank reads as a plank, none as a slab', Math.min(...aspects) >= 2.8,
     `stubbiest is aspect ${Math.min(...aspects).toFixed(2)}`);
-  const lengths = LEVEL_1.plates.map((p) => {
+  const lengths = LEVEL.plates.map((p) => {
     const b = shapeBox(p.shape);
     return b.maxX - b.minX;
   });
   check('stick lengths vary', Math.max(...lengths) / Math.min(...lengths) >= 1.4,
     `${Math.min(...lengths).toFixed(1)}..${Math.max(...lengths).toFixed(1)} long`);
-  const angles = new Set(LEVEL_1.plates.map((p) => Math.round(((p.rot ?? 0) * 180) / Math.PI / 15)));
+  const angles = new Set(LEVEL.plates.map((p) => Math.round(((p.rot ?? 0) * 180) / Math.PI / 15)));
   check('bars run at 3+ different angles', angles.size >= 3, `${angles.size} distinct tilts`);
-  const zs = new Set(LEVEL_1.plates.map((p) => p.z));
+  const zs = new Set(LEVEL.plates.map((p) => p.z));
   check('plates sit on at least 4 depth layers', zs.size >= 4, `${zs.size} layers`);
   console.log(`  ${sig.size} distinct shapes, aspect ${Math.min(...aspects).toFixed(2)}..${Math.max(...aspects).toFixed(2)}, ${angles.size} tilts, ${zs.size} depth layers`);
 }
@@ -189,7 +199,7 @@ console.log(`\n${C.b}OCCLUSION${C.x}  (the picture and the rules must say the sa
 //     touch the row's geometry.
 {
   const r = TUNING.MARBLE_RADIUS;
-  for (const pk of LEVEL_1.pockets) {
+  for (const pk of LEVEL.pockets) {
     const pl = plateOf(pk.plate);
     let worst = null, worstD = 0;
     for (let i = 0; i < pk.count; i++) {
@@ -203,7 +213,7 @@ console.log(`\n${C.b}OCCLUSION${C.x}  (the picture and the rules must say the sa
     }
     check(`${pk.id} fits inside ${pk.plate}`, !worst, `${worst} is off the stick`);
   }
-  console.log(`  ${LEVEL_1.pockets.length} magazines, every bead on its stick`);
+  console.log(`  ${LEVEL.pockets.length} magazines, every bead on its stick`);
 }
 
 // 5. EVERY CROSSING IS PINNED. Two planks may not simply lie across each other
@@ -254,7 +264,7 @@ console.log(`\n${C.b}OCCLUSION${C.x}  (the picture and the rules must say the sa
 //    still cannot move while another lies across it. Walk that dependency and
 //    prove the whole board can actually come apart.
 {
-  const probe = new SourceModel(LEVEL_1);
+  const probe = new SourceModel(LEVEL);
   const settle = () => { for (let i = 0; i < 400; i++) probe.update(1 / 120); };
   // Two layers means the whole top layer is free at t=0 — that is what two
   // layers IS, not a defect. What must still hold is that a real part of the
@@ -289,7 +299,7 @@ console.log(`\n${C.b}OCCLUSION${C.x}  (the picture and the rules must say the sa
 //    between a support and a colour button.
 {
   const soleOwner = [];
-  for (const pk of LEVEL_1.pockets) {
+  for (const pk of LEVEL.pockets) {
     const pl = plateOf(pk.plate);
     if (pl.screws.length < 2) soleOwner.push(`${pk.id} on ${pk.plate}`);
   }
@@ -302,11 +312,11 @@ console.log(`\n${C.b}OCCLUSION${C.x}  (the picture and the rules must say the sa
 // --------------------------------------------------------------- pockets ---
 console.log(`\n${C.b}POCKETS${C.x}`);
 {
-  const kinds = new Set(LEVEL_1.pockets.map((p) => p.kind));
+  const kinds = new Set(LEVEL.pockets.map((p) => p.kind));
   check('at least 3 different release behaviours', kinds.size >= 3, [...kinds].join(','));
-  console.log(`  ${LEVEL_1.pockets.length} pockets, ${kinds.size} container types: ${[...kinds].join(', ')}`);
+  console.log(`  ${LEVEL.pockets.length} pockets, ${kinds.size} container types: ${[...kinds].join(', ')}`);
 
-  for (const pk of LEVEL_1.pockets) {
+  for (const pk of LEVEL.pockets) {
     // Three is the small spill an upright carries; nine is what a long plank
     // holds. The difference between them is the decision.
     check(`magazine ${pk.id} batch size is 3-12`, pk.count >= 3 && pk.count <= 12, `${pk.count}`);
@@ -327,7 +337,7 @@ console.log(`\n${C.b}POCKETS${C.x}`);
   // THE failure condition for this revision: if every screw reliably spills a
   // batch, it is a colour button with a screw sprite on it. Simulate the whole
   // dependency walk and count how many pulls change only the structure.
-  const probe = new SourceModel(LEVEL_1);
+  const probe = new SourceModel(LEVEL);
   const settleP = () => { for (let i = 0; i < 700; i++) probe.update(1 / 120); };
   let structuralOnly = 0, spilling = 0;
   const detail = [];
@@ -343,32 +353,32 @@ console.log(`\n${C.b}POCKETS${C.x}`);
     }
   }
   const multi = src.plates.filter((p) => p.screws.length > 1).length;
-  check('most plates need more than one screw', multi >= LEVEL_1.plates.length * 0.5, `${multi}/${LEVEL_1.plates.length}`);
-  const soleOwned = LEVEL_1.pockets.filter((pk) => plateOf(pk.plate).screws.length === 1).length;
-  check('most pockets are NOT freed by a single screw', soleOwned <= LEVEL_1.pockets.length / 2,
-    `${soleOwned}/${LEVEL_1.pockets.length} pockets hang off one screw`);
-  console.log(`  ${structuralOnly} of ${structuralOnly + spilling} pulls spill nothing; ${multi}/${LEVEL_1.plates.length} plates need 2 supports; ${soleOwned}/${LEVEL_1.pockets.length} pockets on a single screw`);
+  check('most plates need more than one screw', multi >= LEVEL.plates.length * 0.5, `${multi}/${LEVEL.plates.length}`);
+  const soleOwned = LEVEL.pockets.filter((pk) => plateOf(pk.plate).screws.length === 1).length;
+  check('most pockets are NOT freed by a single screw', soleOwned <= LEVEL.pockets.length / 2,
+    `${soleOwned}/${LEVEL.pockets.length} pockets hang off one screw`);
+  console.log(`  ${structuralOnly} of ${structuralOnly + spilling} pulls spill nothing; ${multi}/${LEVEL.plates.length} plates need 2 supports; ${soleOwned}/${LEVEL.pockets.length} pockets on a single screw`);
   console.log(`  ${C.d}per pull: ${detail.join(' ')}${C.x}`);
 }
 
 // --------------------------------------------------------------- colours ---
 console.log(`\n${C.b}COLOUR BALANCE${C.x}`);
-const supply = colorSupply(LEVEL_1), demand = colorDemand(LEVEL_1);
+const supply = colorSupply(LEVEL), demand = colorDemand(LEVEL);
 for (const c of new Set([...Object.keys(supply), ...Object.keys(demand)])) {
   check(`colour balance ${c}`, (supply[c] ?? 0) === (demand[c] ?? 0),
     `supply ${supply[c] ?? 0} vs demand ${demand[c] ?? 0}`);
 }
 const totalMarbles = Object.values(supply).reduce((a, b) => a + b, 0);
-const totalBoxes = LEVEL_1.receiverStacks.reduce((n, c) => n + c.length, 0);
+const totalBoxes = LEVEL.receiverStacks.reduce((n, c) => n + c.length, 0);
 console.log(`  supply ${JSON.stringify(supply)} = ${totalMarbles} marbles`);
 console.log(`  demand ${JSON.stringify(demand)} = ${totalBoxes} boxes x ${RCAP}`);
 check('total marbles 36-90', totalMarbles >= 36 && totalMarbles <= 90, `${totalMarbles}`);
 {
-  const open0 = new Set(LEVEL_1.receiverStacks.map((c) => c[0]));
+  const open0 = new Set(LEVEL.receiverStacks.map((c) => c[0]));
   check('no GREEN receiver at t=0 (the core tension)', !open0.has('green'), [...open0].join(','));
   // And a green batch must be reachable early enough to actually tempt.
   const acc0 = new Set(src.accessible().map((s) => s.id));
-  const earlyGreen = LEVEL_1.pockets.filter((pk) => {
+  const earlyGreen = LEVEL.pockets.filter((pk) => {
     const plate = plateOf(pk.plate);
     return pk.color === 'green' && plate.screws.some((sc) => acc0.has(sc.id));
   });
@@ -381,7 +391,7 @@ check('total marbles 36-90', totalMarbles >= 36 && totalMarbles <= 90, `${totalM
 // ------------------------------------------------------------------ solver ---
 console.log(`\n${C.b}SOLVER${C.x}  (conservative: every batch lands before draining)`);
 function solve() {
-  const screws = LEVEL_1.screws.map((s) => s.id);
+  const screws = LEVEL.screws.map((s) => s.id);
   const idx = new Map(screws.map((s, i) => [s, i]));
 
   const drain = (st) => {
@@ -389,7 +399,7 @@ function solve() {
     while (moved) {
       moved = false;
       for (let ci = 0; ci < st.cols.length; ci++) {
-        const col = st.cols[ci], stack = LEVEL_1.receiverStacks[ci];
+        const col = st.cols[ci], stack = LEVEL.receiverStacks[ci];
         if (col.i >= stack.length) continue;
         const color = stack[col.i];
         while (st.belt[color] > 0 && col.filled < RCAP) { st.belt[color]--; col.filled++; moved = true; }
@@ -410,10 +420,10 @@ function solve() {
   const PL = src.plates.map((p, i) => ({
     i, id: p.id, z: p.z, screws: p.screws.length,
     hasPartial: p.def.partial !== 'none',
-    pockets: LEVEL_1.pockets.filter((k) => k.plate === p.id),
+    pockets: LEVEL.pockets.filter((k) => k.plate === p.id),
   }));
   const pIdx = new Map(PL.map((p) => [p.id, p.i]));
-  const holds = LEVEL_1.screws.map((sc) => (src.platesByScrew.get(sc.id) ?? []).map((pl) => pIdx.get(pl.id)));
+  const holds = LEVEL.screws.map((sc) => (src.platesByScrew.get(sc.id) ?? []).map((pl) => pIdx.get(pl.id)));
   const above = PL.map((p) => (src.overlapsWith.get(p.id) ?? []).filter((q) => q.z > p.z).map((q) => pIdx.get(q.id)));
 
   /** Apply a pull to a state, cascading anything it frees. Returns the spill. */
@@ -451,15 +461,28 @@ function solve() {
 
   let explored = 0;
   const CAP_STATES = 400000;
+  /**
+   * Collect SEVERAL orders, not just the first.
+   *
+   * The count model is optimistic — it treats the belt as a multiset, where the
+   * real belt is a circulating queue. Its favourite order can therefore lose on
+   * the real physics while a different order at the same peak wins. So gather a
+   * handful and let the play-through decide which one is real.
+   */
+  const WANT = 16;
   const attempt = (limit) => {
     const seen = new Set();
     const path = [];
-    let best = null, bestPeak = 0;
+    const found = [];
+    let bestPeak = 0;
     const dfs = (mask, rem, gone, belt, cols, peak) => {
-      if (best) return true;
+      if (found.length >= WANT) return true;
       if (explored > CAP_STATES) return false;
       if (mask === (1 << screws.length) - 1) {
-        if (total(belt) === 0 && gone.every((g) => g)) { best = [...path]; bestPeak = peak; return true; }
+        if (total(belt) === 0 && gone.every((g) => g)) {
+          found.push([...path]); bestPeak = Math.max(bestPeak, peak);
+          return found.length >= WANT;
+        }
         return false;
       }
       const key = `${mask}|${belt.red},${belt.blue},${belt.yellow},${belt.green}|` + cols.map((c) => `${c.i}:${c.filled}`).join(',');
@@ -484,10 +507,10 @@ function solve() {
       return false;
     };
     const belt0 = { red: 0, blue: 0, yellow: 0, green: 0 };
-    const cols0 = LEVEL_1.receiverStacks.map(() => ({ i: 0, filled: 0 }));
+    const cols0 = LEVEL.receiverStacks.map(() => ({ i: 0, filled: 0 }));
     drain({ belt: belt0, cols: cols0 });
     dfs(0, PL.map((p) => p.screws), PL.map(() => 0), belt0, cols0, 0);
-    return best ? { order: best, peak: bestPeak } : null;
+    return found.length ? { orders: found, order: found[0], peak: bestPeak } : null;
   };
 
   for (let limit = 9; limit <= CAP; limit += 3) {
@@ -502,9 +525,11 @@ check('an overflow-free pull order exists', !!solved.order,
   `explored ${solved.explored} states with no solution — the level is unwinnable`);
 if (solved.order) {
   console.log(`  best play peaks at ${solved.peak}/${CAP}, ${solved.order.length} pulls, ${solved.explored} states`);
-  check('optimal play leaves headroom (peak <= 85% of capacity)', solved.peak <= CAP * 0.85, `peak ${solved.peak}/${CAP}`);
+  const budget = LEVEL.peakBudget ?? 0.85;
+  check(`optimal play leaves headroom (peak <= ${Math.round(budget * 100)}% of capacity)`,
+    solved.peak <= CAP * budget, `peak ${solved.peak}/${CAP}`);
   check('optimal play still has to use the buffer (peak >= 30%)', solved.peak >= CAP * 0.3, `peak ${solved.peak}/${CAP}`);
-  if (VERBOSE) console.log('  order: ' + solved.order.join(' '));
+  if (VERBOSE) console.log('  order: ' + (solved.playOrder ?? solved.order).join(' '));
 }
 
 // ---------------------------------------------------------- play-through ---
@@ -517,40 +542,54 @@ const settled = (g) =>
   // THE REAL PHYSICS, not the scripted stand-in. The belt is a circulating queue
   // and a receiver only takes from the exit gate, so which box closes first
   // depends on the order marbles actually land in — and Rapier orders them
-  // differently from the scripted driver. Tuning against the stand-in produced a
-  // level that won here and deadlocked in the browser.
-  const g = new GameModel(LEVEL_1, await RapierDriver.create(LEVEL_1));
-  const order = solved.order ?? LEVEL_1.screws.map((s) => s.id);
-  let t = 0, peak = 0, i = 0, quiet = 0, stable = 0, lastLoad = -1;
-  const ids = new Set();
-  while (g.phase === 'play' && t < 400000) {
-    if (g.sorting.load === lastLoad) stable += 1000 / 60; else { stable = 0; lastLoad = g.sorting.load; }
-    if (i < order.length && settled(g) && stable > 500) {
-      const s = g.source.screwById.get(order[i]);
-      if (g.source.isAccessible(s)) { g.pull(s); i++; stable = 0; }
+  // differently from the count model that proposed the order. So try the orders
+  // the solver found, in turn, and report the first that actually wins. The
+  // claim being proved is "an order exists that wins on the shipping physics",
+  // which is the only claim worth making.
+  const driver = await RapierDriver.create(LEVEL);
+  const orders = solved.orders ?? [LEVEL.screws.map((s) => s.id)];
+  let result = null, tried = 0;
+  for (const order of orders) {
+    driver.reset();
+    const g = new GameModel(LEVEL, driver);
+    let t = 0, peak = 0, i = 0, quiet = 0, stable = 0, lastLoad = -1;
+    const ids = new Set();
+    while (g.phase === 'play' && t < 400000) {
+      if (g.sorting.load === lastLoad) stable += 1000 / 60; else { stable = 0; lastLoad = g.sorting.load; }
+      if (i < order.length && settled(g) && stable > 500) {
+        const s = g.source.screwById.get(order[i]);
+        if (g.source.isAccessible(s)) { g.pull(s); i++; stable = 0; }
+      }
+      g.update(1000 / 60); t += 1000 / 60;
+      peak = Math.max(peak, g.sorting.load);
+      for (const m of g.marbles) ids.add(m.id);
+      if (i >= order.length && g.source.allEmpty && g.sorting.idle && g.airborne === 0) {
+        quiet += 1000 / 60;
+        if (quiet > 2500) break;
+      } else quiet = 0;
     }
-    g.update(1000 / 60); t += 1000 / 60;
-    peak = Math.max(peak, g.sorting.load);
-    for (const m of g.marbles) ids.add(m.id);
-    if (i >= order.length && g.source.allEmpty && g.sorting.idle && g.airborne === 0) {
-      quiet += 1000 / 60;
-      if (quiet > 2500) break;
-    } else quiet = 0;
+    tried++;
+    if (!result || g.phase === 'won') result = { g, peak, t, ids, order };
+    if (g.phase === 'won') break;
   }
-  const st = g.state();
-  check('the level completes', g.phase === 'won', `ended "${g.phase}" — ${JSON.stringify(st)}`);
+  const { g, peak, t, ids } = result;
+  check('the level completes', g.phase === 'won',
+    `no winning order among the ${tried} the solver proposed — ended "${g.phase}"`);
   check('every pocket emptied', g.source.marblesLeft === 0, `${g.source.marblesLeft} marbles still in the sculpture`);
   check('every marble accounted for', ids.size === totalMarbles, `${ids.size} of ${totalMarbles}`);
-  check('the sculpture fully dismantled', g.source.platesLeft === 0, `${g.source.platesLeft} plates left`);
+  check('the board fully dismantled', g.source.platesLeft === 0, `${g.source.platesLeft} planks left`);
   check('conveyor drained', g.sorting.load === 0, `${g.sorting.load} stuck`);
   check('a patient player never fills the belt', peak < CAP, `live peak ${peak}/${CAP}`);
-  console.log(`  ${g.taps} pulls, ${(t / 1000).toFixed(1)}s simulated, ${ids.size} marbles, live peak ${peak}/${CAP}`);
+  console.log(`  ${g.taps} pulls, ${(t / 1000).toFixed(1)}s simulated, ${ids.size} marbles, live peak ${peak}/${CAP}`
+    + (tried > 1 ? `  (order ${tried} of ${orders.length} tried)` : ''));
+  solved.playOrder = result.order;
+  if (VERBOSE) console.log('  winning order: ' + result.order.join(' '));
 }
 
 // --------------------------------------------------------------- flight ---
 console.log(`\n${C.b}FLIGHT${C.x}  (no marble may rely on the rescue net)`);
 {
-  const g = new GameModel(LEVEL_1);
+  const g = new GameModel(LEVEL);
   g.sorting.columns.flat().forEach((r) => { r.state = 'active'; });
   const flights = [];
   let rescued = 0;
@@ -579,7 +618,7 @@ console.log(`\n${C.b}FLIGHT${C.x}  (no marble may rely on the rescue net)`);
 // ---------------------------------------------------------------- chain ---
 console.log(`\n${C.b}CHAIN + BLOCKED + OVERFLOW${C.x}`);
 {
-  const g = new GameModel(LEVEL_1);
+  const g = new GameModel(LEVEL);
   const greenPk = g.source.pockets.find((p) => p.color === 'green');
   g.source.debugOpenPocket(greenPk);
   for (let k = 0; k < 900; k++) g.update(1000 / 60);
@@ -608,7 +647,7 @@ console.log(`\n${C.b}CHAIN + BLOCKED + OVERFLOW${C.x}`);
   // Nothing is buried, so there is no such thing as a refused tap. The gate is
   // physical: strip every screw off a plank that is lying under another and it
   // must stay exactly where it is, spilling nothing, until the one on top goes.
-  const g = new GameModel(LEVEL_1);
+  const g = new GameModel(LEVEL);
   const buried = g.source.plates.find((p) => g.source.trappedBy(p));
   check('some plank starts pinned under another', !!buried, 'the board is a single layer');
   if (buried) {
@@ -628,15 +667,25 @@ console.log(`\n${C.b}CHAIN + BLOCKED + OVERFLOW${C.x}`);
   }
 }
 {
-  const g = new GameModel(LEVEL_1);
+  // A bad tap must never be refused, and it must lose cleanly.
+  //
+  // Strip a free, loaded plank down to its LAST screw first, then fill the belt,
+  // then pull. Filling first and pulling "the first accessible screw" proves
+  // nothing on a board where most pulls only change the structure.
+  const g = new GameModel(LEVEL);
+  // It has to be a `detached` magazine: a `partial` one pours the moment the
+  // plank drops to one screw, i.e. during the stripping, and then the final pull
+  // spills nothing and the test proves nothing.
+  const target = g.source.plates.find((pl) => !g.source.trappedBy(pl) && pl.screws.length >= 2
+    && g.source.pockets.some((pk) => pk.def.plate === pl.id && pk.def.releaseAt === 'detached'));
+  check('some loaded plank is free to strip', !!target);
+  for (const sc of target.screws.slice(0, -1)) g.pull(sc);
+  for (let k = 0; k < 400; k++) g.update(1000 / 60);
+  const shot = target.screws[0];
   g.debugFillConveyor(CAP);
   check('belt filled to capacity', g.sorting.load === CAP, `${g.sorting.load}`);
-  const s = g.source.accessible().find((x) => {
-    const p = g.source.plateById.get(x.plateId);
-    return g.source.pockets.some((pk) => pk.def.plate === p.id);
-  }) ?? g.source.accessible()[0];
-  g.pull(s);
-  check('the pull is ALLOWED even though it may overflow', s.unscrewing || s.removed);
+  g.pull(shot);
+  check('the pull is ALLOWED even though it may overflow', shot.unscrewing || shot.removed);
   for (let k = 0; k < 1400; k++) g.update(1000 / 60);
   check('overflow triggers a clean loss', g.phase === 'lost', `phase ${g.phase}, belt ${g.sorting.load}`);
   for (let k = 0; k < 600; k++) g.update(1000 / 60);
@@ -647,7 +696,7 @@ console.log(`\n${C.b}CHAIN + BLOCKED + OVERFLOW${C.x}`);
 console.log(`\n${C.b}DETERMINISM${C.x}`);
 {
   const run = () => {
-    const g = new GameModel(LEVEL_1);
+    const g = new GameModel(LEVEL);
     const order = solved.order ?? [];
     let i = 0, stable = 0, lastLoad = -1;
     for (let k = 0; k < 14000 && g.phase === 'play'; k++) {
