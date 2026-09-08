@@ -68,4 +68,9 @@ const harness = {
 };
 (window as unknown as Record<string, unknown>).__smd = harness;
 
+// Which build is actually running. GitHub Pages caches index.html for ten
+// minutes, so "I still see the old thing" is usually a stale document rather
+// than a failed deploy — and there was no way to tell the two apart.
+console.log(`[screw-marble-drop] build ${__BUILD__}`);
+
 void game.start();

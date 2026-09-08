@@ -37,8 +37,13 @@ function frameGrabber(): Plugin {
   };
 }
 
+/** A build stamp the running page can print, so "old build or failed deploy?"
+ *  stops being a guess. */
+const BUILD = new Date().toISOString().replace('T', ' ').slice(0, 16) + 'Z';
+
 export default defineConfig({
   base: './',
+  define: { __BUILD__: JSON.stringify(BUILD) },
   server: {
     port: 5176,
     open: false,

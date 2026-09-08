@@ -69,6 +69,15 @@ export class DebugPanel {
   visible = false;
 
   attach(hooks: DebugHooks) {
+    // NOT IN THE SHIPPED BUILD.
+    //
+    // This panel puts an "R restart" button in the DOM. It is hidden behind a
+    // backtick that a phone does not have, so nobody could reach it — but a
+    // stray restart button in a build people are meant to play is exactly the
+    // kind of thing that turns up in a screenshot. `import.meta.env.DEV` is a
+    // literal `false` in the production bundle, so everything below this line
+    // is dead code the minifier drops.
+    if (!import.meta.env.DEV) return;
     this.hooks = hooks;
     if (!this.el) this.build();
   }
