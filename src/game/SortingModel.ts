@@ -47,7 +47,8 @@ export interface SortingEvents {
   onSocketFilled?: (r: Receiver, socket: number) => void;
   onReceiverComplete?: (r: Receiver) => void;
   onReceiverExposed?: (r: Receiver) => void;
-  onOverflow?: (color: MarbleColor) => void;
+  /** A marble reached a full belt and had to wait. Not fatal. */
+  onRefused?: (color: MarbleColor) => void;
 }
 
 export class SortingModel {
@@ -57,7 +58,6 @@ export class SortingModel {
   readonly deliveries: Delivery[] = [];
 
   events: SortingEvents = {};
-  overflowed = false;
   private sortTimer = 0;
 
   constructor(stacks: MarbleColor[][]) {
@@ -94,6 +94,24 @@ export class SortingModel {
     }
     return best;
   }
+  /**
+   * DEADLOCK — the only thing that actually loses the game.
+   *
+   * The belt is full and not one marble on it has an open receiver, so nothing
+   * can drain, so no box can complete, so no new colour can ever be exposed.
+   * A full belt that still holds one servable colour is merely tight: that
+   * marble leaves, a slot opens, and the queue above the entry moves down.
+   *
+   * Deliveries in flight are excluded deliberately — a marble halfway to a box
+   * may be the one that completes it and reveals the colour that frees
+   * everything.
+   */
+  get jammed() {
+    if (this.load < this.capacity) return false;
+    if (this.deliveries.length) return false;
+    return !this.belt.some((b) => !!this.destinationFor(b.color));
+  }
+
   get allDone() { return this.columns.every((c) => c.every((r) => r.state === 'done')); }
   /** Boxes still to fill, for the HUD. */
   get boxesLeft() { return this.columns.flat().filter((r) => r.state !== 'done').length; }
@@ -102,14 +120,17 @@ export class SortingModel {
   // ------------------------------------------------------------------ entry
 
   /**
-   * A marble has reached the belt. Capacity is checked HERE, on arrival — the
-   * brief is explicit that a bad batch must be allowed to pour and fail
-   * visibly, never be refused at the tap.
+   * A marble has reached the belt.
+   *
+   * A FULL BELT IS NOT A LOSS. It refuses the marble, which then queues above
+   * the entry and tries again — and as soon as a matching receiver pulls one
+   * off, the queue moves. Congestion is pressure, not death.
+   *
+   * What kills you is `jammed` below: full AND nothing on it can leave.
    */
   admit(id: number, color: MarbleColor, s: number): BeltMarble | null {
     if (this.load >= this.capacity) {
-      this.overflowed = true;
-      this.events.onOverflow?.(color);
+      this.events.onRefused?.(color);
       return null;
     }
     const m: BeltMarble = { id, color, s: this.path.wrap(s), laps: 0, spin: 0 };

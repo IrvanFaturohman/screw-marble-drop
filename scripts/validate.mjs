@@ -579,7 +579,12 @@ const settled = (g) =>
   check('every marble accounted for', ids.size === totalMarbles, `${ids.size} of ${totalMarbles}`);
   check('the board fully dismantled', g.source.platesLeft === 0, `${g.source.platesLeft} planks left`);
   check('conveyor drained', g.sorting.load === 0, `${g.sorting.load} stuck`);
-  check('a patient player never fills the belt', peak < CAP, `live peak ${peak}/${CAP}`);
+  // Filling the belt is no longer a loss, so "never fills it" is the wrong
+  // thing to demand. What the best play must never do is JAM — reach capacity
+  // with nothing on the ring that any open box will take.
+  check('the best play never jams', !g.sorting.jammed && g.phase === 'won',
+    `phase ${g.phase}, belt ${g.sorting.load}/${CAP}`);
+  check('the best play still has to use the belt', peak >= CAP * 0.3, `live peak ${peak}/${CAP}`);
   console.log(`  ${g.taps} pulls, ${(t / 1000).toFixed(1)}s simulated, ${ids.size} marbles, live peak ${peak}/${CAP}`
     + (tried > 1 ? `  (order ${tried} of ${orders.length} tried)` : ''));
   solved.playOrder = result.order;
@@ -687,9 +692,55 @@ console.log(`\n${C.b}CHAIN + BLOCKED + OVERFLOW${C.x}`);
   g.pull(shot);
   check('the pull is ALLOWED even though it may overflow', shot.unscrewing || shot.removed);
   for (let k = 0; k < 1400; k++) g.update(1000 / 60);
-  check('overflow triggers a clean loss', g.phase === 'lost', `phase ${g.phase}, belt ${g.sorting.load}`);
+  check('a belt full of UNSERVABLE colours is a clean loss', g.phase === 'lost', `phase ${g.phase}, belt ${g.sorting.load}`);
   for (let k = 0; k < 600; k++) g.update(1000 / 60);
   check('the simulation is stable after the loss', g.sorting.load <= CAP);
+}
+
+{
+  // A FULL BELT IS NOT A LOSS.
+  //
+  // Fill it to capacity with a colour that HAS an open receiver. The belt is
+  // jammed by the old rule and perfectly fine by the new one: the matching
+  // marbles drain, slots open, and the run continues. Anything arriving while
+  // it is full queues above the entry instead of being deleted.
+  const g = new GameModel(LEVEL);
+  const live = g.sorting.activeReceivers()[0].color;
+  let i = 0;
+  while (g.sorting.load < CAP && i++ < 80) {
+    const id = 900 + i;
+    const b = g.sorting.admit(id, live, g.sorting.path.wrap(i * TUNING.CONVEYOR_MIN_GAP * 1.3));
+    if (!b) break;
+    const pt = g.sorting.path.point(b.s);
+    g.marbles.push({
+      id, color: live, state: 'belt', x: pt.x, y: pt.y, z: LAYOUT.beltZ,
+      spin: 0, age: 0, t: 0, stillMs: 0, lastX: pt.x, lastY: pt.y,
+      fromX: pt.x, fromY: pt.y, fromZ: 0, origin: 'test', receiverId: '',
+    });
+  }
+  check('the belt can be filled to capacity', g.sorting.load === CAP, `${g.sorting.load}/${CAP}`);
+  check('a full belt holding a servable colour is NOT jammed', !g.sorting.jammed);
+
+  const before = g.sorting.load;
+  for (let k = 0; k < 900; k++) g.update(1000 / 60);
+  check('a full belt with somewhere to go survives', g.phase === 'play', `phase ${g.phase}`);
+  check('and it actually drains', g.sorting.load < before, `still ${g.sorting.load}/${CAP}`);
+  console.log(`  full belt of ${live}: ${before}/${CAP} -> ${g.sorting.load}/${CAP}, still playing`);
+}
+
+{
+  // ... and a marble arriving at a full belt WAITS instead of vanishing.
+  const g = new GameModel(LEVEL);
+  const dead = ['green', 'red', 'blue', 'yellow'].find((c) => !g.sorting.exposedColors().has(c));
+  g.debugFillConveyor(CAP);
+  const pk = g.source.pockets.find((p) => !p.open);
+  g.source.debugOpenPocket(pk);
+  for (let k = 0; k < 260; k++) g.update(1000 / 60);
+  const waiting = g.marbles.filter((m) => m.state === 'intake');
+  check('marbles refused by a full belt queue rather than disappear', waiting.length > 0,
+    `${waiting.length} waiting, ${g.marbles.length} marbles total`);
+  check('none of them were deleted', g.marbles.length >= g.sorting.load, `${g.marbles.length}`);
+  console.log(`  ${waiting.length} marbles stacked above the entry while the belt was full (dead colour ${dead})`);
 }
 
 // --------------------------------------------------------- determinism ---

@@ -305,9 +305,17 @@ Physics is spectacle, never a skill check. Three layers guarantee it:
 
 ## Failure and victory
 
-A bad tap is never refused. The stick opens, the marbles pour, and if one reaches a
-full belt you lose — `CONVEYOR FULL — a batch poured with nowhere left to put it`.
-Pulling every screw the moment it lights up drowns the belt, exactly as it should.
+A bad tap is never refused. The stick opens and the marbles pour.
+
+**A full belt is not a loss.** It refuses the arriving marble, which queues above
+the entry and keeps trying — and the moment a matching box pulls one off the ring,
+the whole stack drops in behind it. Being at 24/24 is pressure, not death.
+
+What loses is a **jam**: the belt is full AND not one colour on it has an open
+box. Nothing can drain, so no box can complete, so no new colour can ever be
+exposed — a dead end rather than a tight spot. It has to hold for a moment before
+the run ends, so the pile-up is something you watch arrive. `NO WAY OUT — the belt
+is full and nothing on it fits an open box`.
 
 Win when every magazine is empty, every marble is sorted, the belt is clear and all
 24 boxes are packed — `LEVEL COMPLETE`. The board then comes apart and drops out of
@@ -401,7 +409,10 @@ Also asserted:
   closed, every plank dismantled
 - every magazine drains in avg 1.2s with **zero** uses of the rescue net
 - exposing a colour drains stuck marbles with zero input
-- overflow loses cleanly; two identical play-throughs match exactly
+- **a full belt with a servable colour survives and drains** (24/24 -> 18/24,
+  still playing), and marbles refused by it queue instead of being deleted
+- **a belt full of unservable colours is a clean loss** — that, and only that
+- two identical play-throughs match exactly
 
 Measured in-browser against the real renderer and Rapier: **12 taps, peak 18/24,
 all 7 planks dismantled**, 36 marbles, then a clean restart — matching the

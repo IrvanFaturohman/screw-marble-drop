@@ -61,6 +61,8 @@ export interface GameEvents {
   onSocketFilled?: (r: Receiver, socket: number) => void;
   onReceiverComplete?: (r: Receiver) => void;
   onReceiverExposed?: (r: Receiver) => void;
+  /** A marble reached a full belt and had to queue. Pressure, not death. */
+  onBeltFull?: (color: MarbleColor) => void;
   onWin?: () => void;
   onLose?: () => void;
 }
@@ -106,7 +108,8 @@ export class GameModel {
       this.completing.push({ r, t: TUNING.RECEIVER_COMPLETE_DELAY + TUNING.RECEIVER_SWAP_DURATION });
       this.events.onReceiverComplete?.(r);
     };
-    this.sorting.events.onOverflow = () => this.fail();
+    // A refused marble is not a failure — it waits. See `checkEnd`.
+    this.sorting.events.onRefused = (c) => this.events.onBeltFull?.(c);
     this.sorting.events.onDispatch = (m, r, i) => this.events.onDispatch?.(m, r, i);
     this.sorting.events.onSocketFilled = (r, i) => this.events.onSocketFilled?.(r, i);
     this.sorting.events.onReceiverExposed = (r) => this.events.onReceiverExposed?.(r);
@@ -201,7 +204,11 @@ export class GameModel {
     this.events.onRelease?.(pk, m);
   }
 
+  /** Marbles stacked above the belt entry this tick, waiting for a slot. */
+  private queued = 0;
+
   private stepMarbles(dt: number) {
+    this.queued = 0;
     const ms = dt * 1000;
     for (let i = this.marbles.length - 1; i >= 0; i--) {
       const m = this.marbles[i];
@@ -253,9 +260,19 @@ export class GameModel {
         m.spin += dt * 6;
         if (m.t >= 1) {
           const b = this.sorting.admit(m.id, m.color, 0);
-          if (!b) { this.removeMarble(i); continue; }
-          m.state = 'belt';
-          this.events.onMarbleLanded?.(m);
+          if (b) {
+            m.state = 'belt';
+            this.events.onMarbleLanded?.(m);
+          } else {
+            // BELT FULL — queue above the entry rather than disappear. The
+            // marble keeps trying every tick, so the moment a matching receiver
+            // pulls one off the ring this whole stack drops in behind it. That
+            // visible backlog IS the pressure the player is reading.
+            const k = this.queued++;
+            m.x = p.x + (k % 2 ? 1.5 : -1.5) * 0.9;
+            m.y = p.y + 2.6 + k * 2.15;
+            m.z = LAYOUT.beltZ;
+          }
         }
         continue;
       }
@@ -319,10 +336,30 @@ export class GameModel {
 
   // ------------------------------------------------------------- end states
 
+  /** Full belt with nothing on it that can leave. */
+  get jammed() { return this.sorting.jammed; }
+
   get airborne() { return this.marbles.filter((m) => m.state === 'falling' || m.state === 'intake').length; }
 
+  /**
+   * How long the belt has been jammed. A jam has to HOLD before it ends the
+   * game: a single frame where nothing matches can be undone by a box finishing
+   * a moment later, and the player deserves to watch the pile-up happen rather
+   * than have it announced.
+   */
+  private jamMs = 0;
+
   private checkEnd() {
-    if (this.sorting.overflowed) return this.fail();
+    // A FULL BELT IS NOT A LOSS. Losing means the belt is full AND not one
+    // colour on it has an open receiver — nothing can drain, so no box can
+    // complete, so no new colour can ever appear. That is a dead end; a full
+    // belt with a servable colour on it is just a tight spot.
+    if (this.sorting.jammed) {
+      this.jamMs += 1000 / 120;
+      if (this.jamMs >= TUNING.JAM_GRACE_MS) return this.fail();
+    } else {
+      this.jamMs = 0;
+    }
     if (
       this.source.allEmpty &&
       this.airborne === 0 &&
@@ -385,6 +422,7 @@ export class GameModel {
       accessible: this.source.accessible().map((s) => s.id),
       airborne: this.airborne,
       belt: `${this.sorting.load}/${this.sorting.capacity}`,
+      jammed: this.sorting.jammed,
       beltColors: this.sorting.belt.map((b) => b.color[0]).join(''),
       exposed: this.sorting.activeReceivers().map((r) => `${r.color}:${r.filled}/${TUNING.RECEIVER_CAPACITY}`),
       boxesLeft: this.sorting.boxesLeft,

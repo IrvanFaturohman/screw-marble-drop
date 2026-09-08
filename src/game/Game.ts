@@ -123,6 +123,11 @@ export class Game {
       if (marble.id % 3 === 0) audio.tick(0.35 + Math.random() * 0.3);
     };
     m.events.onUnlocked = () => { audio.reveal(); };
+    // Tight is not dead. Say so, so a full belt does not read as a loss.
+    m.events.onBeltFull = () => {
+      if (m.jammed) this.hud.flashHint('NOTHING FITS — BELT JAMMED');
+      else this.hud.flashHint('BELT FULL — WAITING FOR A SLOT');
+    };
     m.events.onMarbleLanded = () => { audio.land(); };
     m.events.onSocketFilled = (r, i) => {
       audio.snap(i); haptics.snap(i);

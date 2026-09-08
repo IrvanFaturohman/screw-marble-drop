@@ -251,6 +251,10 @@ export const TUNING = {
 
   // --- receivers ---
   RECEIVER_CAPACITY: 3,
+  /** How long the belt must stay jammed — full AND nothing on it servable —
+   *  before the run ends. Long enough to watch the deadlock arrive, short
+   *  enough that it never feels arbitrary. */
+  JAM_GRACE_MS: 1100,
   RECEIVER_COMPLETE_DELAY: 170,
   RECEIVER_SWAP_DURATION: 260,
 

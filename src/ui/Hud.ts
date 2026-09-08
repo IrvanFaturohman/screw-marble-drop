@@ -99,7 +99,7 @@ export class Hud {
   }
 
   showOverlay(won: boolean, m: GameModel, lv?: { level: number; total: number; name: string; more: boolean }) {
-    const title = won ? (lv?.more ? `LEVEL ${lv.level} CLEAR` : 'ALL LEVELS CLEAR') : 'CONVEYOR FULL';
+    const title = won ? (lv?.more ? `LEVEL ${lv.level} CLEAR` : 'ALL LEVELS CLEAR') : 'NO WAY OUT';
     const cta = won ? (lv?.more ? `NEXT: ${LEVELS[lv.level].name}` : 'PLAY AGAIN') : 'RETRY';
     this.overlay.classList.remove('hidden');
     this.overlay.innerHTML = `
@@ -107,7 +107,7 @@ export class Hud {
         <h1>${title}</h1>
         <p>${won
           ? `${m.taps} taps · ${m.sorting.boxesTotal} boxes packed`
-          : 'a batch poured with nowhere left to put it'}</p>
+          : 'the belt is full and nothing on it fits an open box'}</p>
         <button id="hud-restart">${cta}</button>
       </div>`;
     const btn = document.getElementById('hud-restart')!;
