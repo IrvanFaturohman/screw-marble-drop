@@ -223,7 +223,11 @@ export class StructureView {
       const hole = new THREE.Mesh(GEO.socket, new THREE.MeshStandardMaterial({
         color: 0x3a2f24, roughness: 0.95, metalness: 0,
       }));
-      hole.scale.set(LAYOUT.screwR * 0.78, 0.05, LAYOUT.screwR * 0.78);
+      // A DRILLED HOLE, not a crater. At 0.78 of the head radius it came out
+      // wider than the beads sitting beside it in the same plank, which read as
+      // a gap in the plank rather than a hole a screw came out of. A real one is
+      // the shank, well inside the head that covered it.
+      hole.scale.set(LAYOUT.screwR * 0.34, 0.05, LAYOUT.screwR * 0.34);
       hole.rotation.x = Math.PI / 2;
       hole.visible = false;
       group.add(hole);

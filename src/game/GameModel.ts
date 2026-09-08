@@ -264,13 +264,19 @@ export class GameModel {
             m.state = 'belt';
             this.events.onMarbleLanded?.(m);
           } else {
-            // BELT FULL — queue above the entry rather than disappear. The
-            // marble keeps trying every tick, so the moment a matching receiver
-            // pulls one off the ring this whole stack drops in behind it. That
-            // visible backlog IS the pressure the player is reading.
+            // BELT FULL — STACK UP, do not disappear.
+            //
+            // The marble keeps trying every tick, so the moment a matching box
+            // pulls one off the ring the whole stack drops in behind it. It has
+            // to READ as a backlog, so they pile two abreast and touching, the
+            // way marbles actually queue in a chute — a single ball hovering in
+            // the gap said nothing about how close to full the belt was.
             const k = this.queued++;
-            m.x = p.x + (k % 2 ? 1.5 : -1.5) * 0.9;
-            m.y = p.y + 2.6 + k * 2.15;
+            const row = Math.floor(k / 2);
+            const d = TUNING.MARBLE_RADIUS * 2;
+            m.x = p.x + (k % 2 ? d * 0.5 : -d * 0.5);
+            // Rows nest into each other's gaps, so the column looks packed.
+            m.y = p.y + d * 0.95 + row * d * 0.88;
             m.z = LAYOUT.beltZ;
           }
         }
