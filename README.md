@@ -327,8 +327,16 @@ the whole stack drops in behind it. Being at 12/12 is pressure, not death.
 What loses is a **jam**: the belt is full AND not one colour on it has an open
 box. Nothing can drain, so no box can complete, so no new colour can ever be
 exposed — a dead end rather than a tight spot. It has to hold for a moment before
-the run ends, so the pile-up is something you watch arrive. `NO WAY OUT — the belt
-is full and nothing on it fits an open box`.
+the run ends, so the pile-up is something you watch arrive.
+
+**Losing does not freeze the board and it does not put a button over it.** The
+simulation keeps running: whatever was still pouring keeps arriving, is refused
+by the full belt, and stacks above the funnel two abreast until the last one
+lands. What you are left looking at is the jam itself — a full ring of one dead
+colour and a column of marbles with nowhere to go — under a single line of text,
+`NO WAY OUT — nothing on the belt fits an open box`. A tap anywhere starts over,
+armed a second and a half late so the tap that killed the run cannot also be the
+one that wipes it away. Only winning gets a panel.
 
 ### A level that cannot be lost is not a level
 

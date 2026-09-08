@@ -269,6 +269,10 @@ export const TUNING = {
    *  before the run ends. Long enough to watch the deadlock arrive, short
    *  enough that it never feels arbitrary. */
   JAM_GRACE_MS: 1100,
+  /** After a jam the board keeps running and the marbles pile up. This is how
+   *  long before a tap anywhere restarts, so the tap that caused it cannot
+   *  also be the tap that clears it. */
+  JAM_RESTART_ARM_MS: 1500,
   RECEIVER_COMPLETE_DELAY: 170,
   RECEIVER_SWAP_DURATION: 260,
 

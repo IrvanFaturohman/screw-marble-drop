@@ -70,6 +70,13 @@ export class Hud {
     this.hint.classList.add('show');
     this.hintTimer = performance.now() + 1900;
   }
+  /** A hint that stays put. A jam is not an event you might have missed, it is
+   *  the state the board is now in, so it does not time out. */
+  holdHint(text: string) {
+    this.hint.textContent = text;
+    this.hint.classList.add('show');
+    this.hintTimer = 0;
+  }
   dismissHint() { this.hintTimer = Math.min(this.hintTimer, performance.now() + 260); }
 
   update(m: GameModel, debugText: string | null) {
@@ -98,17 +105,20 @@ export class Hud {
     if (debugText !== null) this.debug.textContent = debugText;
   }
 
-  showOverlay(won: boolean, m: GameModel, lv?: { level: number; total: number; name: string; more: boolean }) {
-    const title = won ? (lv?.more ? `LEVEL ${lv.level} CLEAR` : 'ALL LEVELS CLEAR') : 'NO WAY OUT';
-    const cta = won ? (lv?.more ? `NEXT: ${LEVELS[lv.level].name}` : 'PLAY AGAIN') : 'RETRY';
+  /**
+   * The WIN panel. There is no losing one.
+   *
+   * A jam leaves the board running and the marbles piling up, and a panel over
+   * the top of that would hide the only thing the player needs to see. Losing
+   * says so with `holdHint` and a tap-anywhere restart instead.
+   */
+  showOverlay(m: GameModel, lv?: { level: number; total: number; name: string; more: boolean }) {
     this.overlay.classList.remove('hidden');
     this.overlay.innerHTML = `
-      <div class="panel ${won ? 'win' : 'lose'}">
-        <h1>${title}</h1>
-        <p>${won
-          ? `${m.taps} taps · ${m.sorting.boxesTotal} boxes packed`
-          : 'the belt is full and nothing on it fits an open box'}</p>
-        <button id="hud-restart">${cta}</button>
+      <div class="panel win">
+        <h1>${lv?.more ? `LEVEL ${lv.level} CLEAR` : 'ALL LEVELS CLEAR'}</h1>
+        <p>${m.taps} taps · ${m.sorting.boxesTotal} boxes packed</p>
+        <button id="hud-restart">${lv?.more ? `NEXT: ${LEVELS[lv.level].name}` : 'PLAY AGAIN'}</button>
       </div>`;
     const btn = document.getElementById('hud-restart')!;
     btn.addEventListener('click', (e) => { e.stopPropagation(); this.onRestart(); });

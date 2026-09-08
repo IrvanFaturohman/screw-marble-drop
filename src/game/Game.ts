@@ -33,6 +33,8 @@ export class Game {
   private last = 0;
   private raf = 0;
   private ended = false;
+  /** Clock time the run jammed, or 0. The board keeps running after it. */
+  private deadAt = 0;
   private tmp = new THREE.Vector3();
   private warnedAt = 0;
   showDebug = false;
@@ -62,6 +64,7 @@ export class Game {
     const driver = await RapierDriver.create(level);
     this.model = new GameModel(level, driver);
     this.ended = false;
+    this.deadAt = 0;
 
     this.structure = new StructureView(this.model);
     this.track = new TrackView(this.model, level);
@@ -125,6 +128,9 @@ export class Game {
     m.events.onUnlocked = () => { audio.reveal(); };
     // Tight is not dead. Say so, so a full belt does not read as a loss.
     m.events.onBeltFull = () => {
+      // Once the run is dead the board keeps pouring, so this fires on every
+      // refused marble. The verdict is already up and it stays up.
+      if (this.deadAt) return;
       if (m.jammed) this.hud.flashHint('NOTHING FITS — BELT JAMMED');
       else this.hud.flashHint('BELT FULL — WAITING FOR A SLOT');
     };
@@ -155,6 +161,13 @@ export class Game {
     const el = this.world.renderer.domElement;
     el.addEventListener('pointerdown', (e) => {
       audio.init();
+      if (this.deadAt) {
+        // The board is dead and piling up. There is no button; the tap is the
+        // button, armed late enough that the tap which killed the run cannot
+        // also be the one that wipes it away.
+        if (this.clock - this.deadAt > TUNING.JAM_RESTART_ARM_MS) this.restart();
+        return;
+      }
       if (this.ended || this.model.phase !== 'play') return;
       this.world.screenToWorld(e.clientX, e.clientY, LAYOUT.screwZ, this.tmp);
       this.model.tap(this.tmp.x, this.tmp.y);
@@ -261,14 +274,30 @@ export class Game {
   // ------------------------------------------------------------- end states
 
   private finish(won: boolean) {
-    if (this.ended) return;
-    this.ended = true;
-    if (won) { audio.win(); haptics.win(); this.juice.celebrate(); /* the sculpture has already dismantled itself */ }
-    else { audio.fail(); haptics.fail(); this.world.shake(1.4, 260); }
-    const more = won && this.levelIndex < LEVELS.length - 1;
-    setTimeout(() => this.hud.showOverlay(won, this.model, {
-      level: this.levelIndex + 1, total: LEVELS.length, name: this.level.name, more,
-    }), won ? 500 : 340);
+    if (this.ended || this.deadAt) return;
+
+    if (won) {
+      this.ended = true;
+      audio.win(); haptics.win(); this.juice.celebrate(); // the sculpture has already dismantled itself
+      const more = this.levelIndex < LEVELS.length - 1;
+      setTimeout(() => this.hud.showOverlay(this.model, {
+        level: this.levelIndex + 1, total: LEVELS.length, name: this.level.name, more,
+      }), 500);
+      return;
+    }
+
+    // A JAM IS NOT A DIALOG.
+    //
+    // Freezing the board and dropping a RETRY button over it hides the one
+    // thing worth looking at. The belt is full, nothing on it fits an open box,
+    // and the marbles still falling have nowhere to go — so let them arrive.
+    // The simulation keeps running and they stack above the funnel, two abreast,
+    // until the last one lands on a pile that says exactly how badly it went.
+    //
+    // A tap anywhere starts over, once the pile has had a moment to settle.
+    audio.fail(); haptics.fail(); this.world.shake(1.4, 260);
+    this.deadAt = this.clock;
+    this.hud.holdHint('NO WAY OUT — nothing on the belt fits an open box');
   }
 
   /** Win -> next board. Lose -> the same one again. */

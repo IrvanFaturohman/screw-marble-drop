@@ -356,6 +356,11 @@ export class GameModel {
   private jamMs = 0;
 
   private checkEnd() {
+    // The board keeps simulating after a loss — marbles still in the air have
+    // to land somewhere, and where they land is the pile. So a finished run
+    // must never be re-decided.
+    if (this.phase !== 'play') return;
+
     // A FULL BELT IS NOT A LOSS. Losing means the belt is full AND not one
     // colour on it has an open receiver — nothing can drain, so no box can
     // complete, so no new colour can ever appear. That is a dead end; a full
