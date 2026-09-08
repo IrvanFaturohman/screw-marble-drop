@@ -21,7 +21,7 @@
 
 import { LAYOUT, TUNING, type MarbleColor } from '../config/GameConfig';
 import {
-  pocketSlot, type LevelDef, type PlateDef, type PocketDef, type ScrewDef,
+  pocketLayout, pocketSlot, type LevelDef, type PlateDef, type PocketDef, type ScrewDef,
 } from '../config/LevelConfig';
 import { containsWorld, shapeBounds, shapeBoxRot, toLocal, toWorld, type PlateTransform } from './PlateShapes';
 import { clamp, smoothstep } from './Geometry';
@@ -474,7 +474,7 @@ export class SourceModel {
     let guard = 0;
     while (pk.pending > 0 && pk.releaseTimer <= 0 && guard++ < 20) {
       const index = pk.total - pk.pending;
-      const slot = pocketSlot(pk.def, index);
+      const slot = pocketSlot(pk.def, index, pocketLayout(this.level, pk.def));
       const [wx, wy] = plate.localToWorld(pk.lx + slot.dx, pk.ly + slot.dy);
       this.events.onRelease?.(pk, index, wx, wy, plate.z);
       pk.pending--;

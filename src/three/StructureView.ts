@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { COLORS, ENV, LAYOUT, plateShade, TUNING } from '../config/GameConfig';
-import { plateTint, pocketSlot } from '../config/LevelConfig';
+import { plateTint, pocketLayout, pocketSlot } from '../config/LevelConfig';
 import type { GameModel } from '../game/GameModel';
 import type { Plate, Pocket, Screw } from '../game/SourceModel';
 import type { ShapeDef } from '../game/PlateShapes';
@@ -181,8 +181,9 @@ export class StructureView {
       // actual 3D marbles only exist once they are pouring.
       const mesh = new THREE.InstancedMesh(GEO.socket, pipMat(pk.color), pk.total);
       mesh.frustumCulled = false;
+      const lay = pocketLayout(this.model.level, pk.def);
       for (let i = 0; i < pk.total; i++) {
-        const slot = pocketSlot(pk.def, i);
+        const slot = pocketSlot(pk.def, i, lay);
         dummy.position.set(pk.lx + slot.dx, pk.ly + slot.dy, PLATE_FACE + 0.02);
         dummy.rotation.set(Math.PI / 2, 0, 0);
         dummy.scale.set(PIP_R, 0.06, PIP_R);

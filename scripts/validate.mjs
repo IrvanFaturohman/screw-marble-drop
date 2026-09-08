@@ -374,18 +374,27 @@ console.log(`  supply ${JSON.stringify(supply)} = ${totalMarbles} marbles`);
 console.log(`  demand ${JSON.stringify(demand)} = ${totalBoxes} boxes x ${RCAP}`);
 check('total marbles 36-90', totalMarbles >= 36 && totalMarbles <= 90, `${totalMarbles}`);
 {
+  // THE BAIT: a colour you can spill on turn one that has nowhere to go.
+  //
+  // This used to be spelled GREEN, because green was the bait in the first
+  // level anyone wrote. It is a structural property, not a palette one — with
+  // four colours and three columns some colour is always shut out at t=0, and
+  // the level is only tense if a fat batch of THAT colour is one tap away. So
+  // derive which colour it is instead of asserting the answer.
   const open0 = new Set(LEVEL.receiverStacks.map((c) => c[0]));
-  check('no GREEN receiver at t=0 (the core tension)', !open0.has('green'), [...open0].join(','));
-  // And a green batch must be reachable early enough to actually tempt.
+  const shut = [...new Set(LEVEL.pockets.map((p) => p.color))].filter((c) => !open0.has(c));
+  check('some colour has no receiver at t=0 (the core tension)', shut.length > 0,
+    `every colour on the board can be delivered immediately: ${[...open0].join(',')}`);
   const acc0 = new Set(src.accessible().map((s) => s.id));
-  const earlyGreen = LEVEL.pockets.filter((pk) => {
+  const bait = LEVEL.pockets.filter((pk) => {
     const plate = plateOf(pk.plate);
-    return pk.color === 'green' && plate.screws.some((sc) => acc0.has(sc.id));
+    return shut.includes(pk.color) && plate.screws.some((sc) => acc0.has(sc.id));
   });
-  check('a GREEN batch is one tap away at t=0 (the bait exists)', earlyGreen.length > 0);
-  const debt = earlyGreen.reduce((n, p) => n + p.count, 0);
-  check('that green costs a real slice of the buffer', debt >= CAP * 0.3, `${debt} vs capacity ${CAP}`);
-  console.log(`  green bait from t=0: ${earlyGreen.map((p) => p.id).join(',')} = ${debt} marbles of pure debt`);
+  check('a batch of it is one tap away at t=0 (the bait exists)', bait.length > 0,
+    `${shut.join('/')} has no destination, but no batch of it is reachable`);
+  const debt = bait.reduce((n, p) => n + p.count, 0);
+  check('that bait costs a real slice of the buffer', debt >= CAP * 0.3, `${debt} vs capacity ${CAP}`);
+  console.log(`  shut out at t=0: ${shut.join(',')} — bait ${bait.map((p) => p.id).join(',')} = ${debt} marbles of pure debt`);
 }
 
 // ------------------------------------------------------------------ solver ---
@@ -459,7 +468,10 @@ function solve() {
     return spill;
   }
 
-  let explored = 0;
+  let explored = 0, budget = 0;
+  /** Per-attempt state budget. It used to be one budget shared by the whole
+   *  sweep, so the hopeless low limits ate it and the feasible one at the top
+   *  reported "unwinnable" having barely been searched. */
   const CAP_STATES = 400000;
   /**
    * Collect SEVERAL orders, not just the first.
@@ -477,7 +489,7 @@ function solve() {
     let bestPeak = 0;
     const dfs = (mask, rem, gone, belt, cols, peak) => {
       if (found.length >= WANT) return true;
-      if (explored > CAP_STATES) return false;
+      if (budget > CAP_STATES) return false;
       if (mask === (1 << screws.length) - 1) {
         if (total(belt) === 0 && gone.every((g) => g)) {
           found.push([...path]); bestPeak = Math.max(bestPeak, peak);
@@ -487,7 +499,7 @@ function solve() {
       }
       const key = `${mask}|${belt.red},${belt.blue},${belt.yellow},${belt.green}|` + cols.map((c) => `${c.i}:${c.filled}`).join(',');
       if (seen.has(key)) return false;
-      seen.add(key); explored++;
+      seen.add(key); explored++; budget++;
 
       for (let i = 0; i < screws.length; i++) {
         if (mask & (1 << i)) continue;
@@ -513,13 +525,88 @@ function solve() {
     return found.length ? { orders: found, order: found[0], peak: bestPeak } : null;
   };
 
-  for (let limit = 9; limit <= CAP; limit += 3) {
+  /**
+   * IS THIS LEVEL LOSABLE?
+   *
+   * You lose when the belt is FULL and nothing on it fits an open box. That is
+   * a much narrower condition than "full", and it is easy to ship a level where
+   * it simply cannot happen: four colours share three receiver columns, so
+   * exactly one colour is dead at any moment, and if no colour's supply exceeds
+   * the belt then a dead colour can never fill it on its own. Both levels were
+   * in that state at a capacity of 24 — provably unlosable, and nobody noticed
+   * because every test asked whether the level could be WON.
+   *
+   * The search is over PLANKS, not screws. A jam is nine screws deep in
+   * SCAFFOLD — three uprights, three screws each — which is hopeless breadth
+   * first over eighteen screws, and trivial once you notice that nobody pulls
+   * screws at random: you decide to take a plank off and then take it off. So
+   * each step here strips one whole plank, checking after every individual
+   * screw, and the branching factor is eight planks instead of eighteen screws.
+   *
+   * After `drain` has run, a belt at or over capacity means every colour on it
+   * has nowhere to go. That is the jam, exactly as `SortingModel.jammed`
+   * defines it.
+   */
+  const findJam = () => {
+    const N = PL.length;
+    const screwsOn = PL.map((p) => screws.map((_, i) => i).filter((i) => holds[i].includes(p.i)));
+    let best = null, states = 0, maxPlanks = 0;
+    const walk = (pmask, smask, rem, gone, belt, cols, path, depth) => {
+      if (best || states > 80000 || depth > maxPlanks) return;
+      states++;
+      for (let pi = 0; pi < N; pi++) {
+        if (pmask & (1 << pi)) continue;
+        const r = rem.slice(), gn = gone.slice(), b = { ...belt }, c = cols.map((x) => ({ ...x }));
+        const pth = path.slice();
+        let sm = smask, jammed = false;
+        for (const si of screwsOn[pi]) {
+          if (sm & (1 << si)) continue;
+          if (!holds[si].some((qi) => !gn[qi])) continue;
+          const spill = applyPull(r, gn, si);
+          for (const col of ['red', 'blue', 'yellow', 'green']) b[col] += spill[col];
+          sm |= 1 << si; pth.push(screws[si]);
+          drain({ belt: b, cols: c });
+          if (total(b) >= CAP) { jammed = true; break; }
+        }
+        if (jammed) { best = { path: pth, belt: { ...b }, states }; return; }
+        walk(pmask | (1 << pi), sm, r, gn, b, c, pth, depth + 1);
+        if (best) return;
+      }
+    };
+    const belt0 = { red: 0, blue: 0, yellow: 0, green: 0 };
+    const cols0 = LEVEL.receiverStacks.map(() => ({ i: 0, filled: 0 }));
+    drain({ belt: belt0, cols: cols0 });
+    // Iterative deepening on PLANKS REMOVED, so what comes back is the fewest
+    // planks it takes to kill the run. A jam you only reach by dismantling the
+    // whole board is technically losable and practically not: the shortest line
+    // is the one that says whether the threat is real.
+    for (maxPlanks = 1; maxPlanks <= N && !best; maxPlanks++) {
+      states = 0;
+      walk(0, 0, PL.map((p) => p.screws), PL.map(() => 0), { ...belt0 }, cols0.map((c) => ({ ...c })), [], 1);
+    }
+    return best;
+  };
+  const jam = findJam();
+
+  // Walk the limit up ONE at a time, starting at the biggest single batch.
+  //
+  // Stepping by three was invisible at a capacity of 24; at 12 it means trying
+  // 9, then 12, and reporting "the best play needs the whole belt" when a
+  // 10-marble line was sitting right there. The point of this sweep is to find
+  // the TIGHTEST line that wins, so its resolution has to be one marble.
+  //
+  // And nothing can peak below the largest pocket, because a batch lands in
+  // full before anything drains — so searching below that is pure waste.
+  const floor = Math.max(...LEVEL.pockets.map((p) => p.count));
+  for (let limit = floor; limit <= CAP; limit++) {
+    budget = 0;
     const r = attempt(limit);
-    if (r) return { ...r, explored };
+    if (r) return { ...r, explored, jam };
   }
-  return { order: null, peak: 0, explored };
+  return { order: null, peak: 0, explored, jam };
 }
 
+const total0 = (b) => b.red + b.blue + b.yellow + b.green;
 const solved = solve();
 check('an overflow-free pull order exists', !!solved.order,
   `explored ${solved.explored} states with no solution — the level is unwinnable`);
@@ -591,6 +678,44 @@ const settled = (g) =>
   if (VERBOSE) console.log('  winning order: ' + result.order.join(' '));
 }
 
+// ------------------------------------------------------------ losability ---
+// A LEVEL THAT CANNOT BE LOST IS NOT A LEVEL.
+//
+// Everything above proves the level can be won. This proves it can be lost —
+// not in a debug console, but by pulling screws in an order a player could
+// actually pull them, on the shipping physics, ending in the real overlay.
+console.log(`\n${C.b}LOSABILITY${C.x}  (a jam must be reachable by playing, not just by cheating)`);
+check('a losing line exists', !!solved.jam,
+  'no order of pulls can ever fill the belt with colours that have nowhere to go — '
+  + 'the level is unlosable. Raise the dominant colour above CONVEYOR_CAPACITY, or lower the belt.');
+if (solved.jam) {
+  const { path, belt, states } = solved.jam;
+  const dead = Object.entries(belt).filter(([, n]) => n > 0).map(([c, n]) => `${n} ${c}`).join(' + ');
+  console.log(`  shortest loss: ${path.length} pulls -> belt ${total0(belt)}/${CAP} (${dead}), ${states} states`);
+  check('losing takes real misplay, not one careless tap', path.length >= 3, `${path.length} pulls and the run is dead`);
+
+  const driver = await RapierDriver.create(LEVEL);
+  const g = new GameModel(LEVEL, driver);
+  let t = 0, i = 0, stable = 0, lastLoad = -1, sawJam = false;
+  while (t < 200000) {
+    if (g.sorting.load === lastLoad) stable += 1000 / 60; else { stable = 0; lastLoad = g.sorting.load; }
+    if (i < path.length && settled(g) && stable > 500) {
+      const sc = g.source.screwById.get(path[i]);
+      if (g.source.isAccessible(sc)) { g.pull(sc); i++; stable = 0; }
+    }
+    g.update(1000 / 60); t += 1000 / 60;
+    if (g.sorting.jammed) sawJam = true;
+    if (g.phase !== 'play') break;
+    // Once the line is exhausted, give the jam its grace period and no more.
+    if (i >= path.length && g.source.allEmpty && g.sorting.idle && g.airborne === 0 && !sawJam) break;
+  }
+  check('the belt really jams on the shipping physics', sawJam,
+    `played all ${path.length} pulls and the belt never deadlocked (load ${g.sorting.load}/${CAP})`);
+  check('and the run actually ends', g.phase === 'lost', `ended "${g.phase}" instead`);
+  console.log(`  ${g.taps} pulls, ${(t / 1000).toFixed(1)}s simulated, belt ${g.sorting.load}/${CAP}, phase ${g.phase}`);
+  if (VERBOSE) console.log('  losing order: ' + path.join(' '));
+}
+
 // --------------------------------------------------------------- flight ---
 console.log(`\n${C.b}FLIGHT${C.x}  (no marble may rely on the rescue net)`);
 {
@@ -624,18 +749,20 @@ console.log(`\n${C.b}FLIGHT${C.x}  (no marble may rely on the rescue net)`);
 console.log(`\n${C.b}CHAIN + BLOCKED + OVERFLOW${C.x}`);
 {
   const g = new GameModel(LEVEL);
-  const greenPk = g.source.pockets.find((p) => p.color === 'green');
+  // Whatever colour is shut out at t=0 — see the bait check above.
+  const open0 = new Set(LEVEL.receiverStacks.map((c) => c[0]));
+  const greenPk = g.source.pockets.find((p) => !open0.has(p.color));
   g.source.debugOpenPocket(greenPk);
   for (let k = 0; k < 900; k++) g.update(1000 / 60);
-  check('a green batch with no receiver stays on the belt', g.sorting.load === greenPk.total,
+  check('a batch with no receiver stays on the belt', g.sorting.load === greenPk.total,
     `belt ${g.sorting.load}, expected ${greenPk.total}`);
   const before = g.sorting.load;
   let guard = 0;
   // Advance whichever column actually reaches green — it is not always the
   // first one, and the tuner is free to move it.
-  const greenCol = g.sorting.columns.findIndex((c) => c.some((r) => r.color === 'green'));
-  check('some receiver column reaches green', greenCol >= 0, 'no green destination anywhere');
-  while (greenCol >= 0 && !g.sorting.activeReceivers().some((r) => r.color === 'green') && guard++ < 12) {
+  const greenCol = g.sorting.columns.findIndex((c) => c.some((r) => r.color === greenPk.color));
+  check(`some receiver column reaches ${greenPk.color}`, greenCol >= 0, `no ${greenPk.color} destination anywhere`);
+  while (greenCol >= 0 && !g.sorting.activeReceivers().some((r) => r.color === greenPk.color) && guard++ < 12) {
     const a = g.sorting.columns[greenCol].find((r) => r.state === 'active');
     if (!a) break;
     a.filled = RCAP; a.state = 'completing'; g.sorting.advanceColumn(a);
@@ -645,8 +772,8 @@ console.log(`\n${C.b}CHAIN + BLOCKED + OVERFLOW${C.x}`);
     g.update(1000 / 60);
     if (drainedAt < 0 && g.sorting.load <= before - 3) drainedAt = (k * 1000) / 60;
   }
-  check('exposing GREEN drains the stuck marbles with zero input', drainedAt > 0, `belt ${g.sorting.load} (was ${before})`);
-  console.log(`  ${before} stuck green -> first three drained in ${(drainedAt / 1000).toFixed(2)}s`);
+  check('exposing that colour drains the stuck marbles with zero input', drainedAt > 0, `belt ${g.sorting.load} (was ${before})`);
+  console.log(`  ${before} stuck ${greenPk.color} -> first three drained in ${(drainedAt / 1000).toFixed(2)}s`);
 }
 {
   // Nothing is buried, so there is no such thing as a refused tap. The gate is

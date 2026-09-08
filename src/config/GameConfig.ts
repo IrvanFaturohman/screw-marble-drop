@@ -232,7 +232,21 @@ export const TUNING = {
   ANTI_REST_IMPULSE: 11,
 
   // --- conveyor ---
-  CONVEYOR_CAPACITY: 24,
+  /**
+   * How many marbles the belt holds.
+   *
+   * THIS NUMBER IS THE FAIL CONDITION. You lose when the belt is full and no
+   * colour on it has an open box, so a jam is only reachable if some colour's
+   * supply can exceed this on its own. At 24 nothing could: four colours share
+   * three receiver columns, so exactly one colour is dead at any moment, and no
+   * level ships more than 15 of any single colour. Both levels were unlosable.
+   *
+   * At 12, the dominant colour of each level (15 green in LATTICE, 15 red in
+   * SCAFFOLD) can drown the belt by itself while its column is shut. `npm run
+   * validate` proves that with a real losing line, and would fail if a level
+   * ever drifted back to being safe.
+   */
+  CONVEYOR_CAPACITY: 12,
   /** Arc units per second. */
   CONVEYOR_SPEED: 13.5,
   /** Speed multiplier for a marble whose colour has an open receiver. */

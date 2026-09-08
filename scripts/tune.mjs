@@ -315,12 +315,18 @@ const shuffled = () => {
 };
 
 /**
- * Aim for a BAND, not a minimum. A level whose optimal play peaks at 12/24 has
- * so much slack the buffer never bites; one that peaks at 21 cannot be misplayed
- * at all. The interesting window is "you must plan, but you can breathe".
+ * Aim for a BAND, not a minimum. A level whose optimal play peaks at half the
+ * belt has so much slack the buffer never bites; one that peaks at the cap
+ * cannot be misplayed at all. The interesting window is "you must plan, but you
+ * can breathe".
+ *
+ * The band is a FRACTION of capacity, not two literals. It used to be 14-17,
+ * which is 58-71% of the 24-marble belt it was written for — and silently
+ * became "12 or more" when the belt shrank to 12, so the tuner started
+ * preferring the orderings that saturate.
  */
-const TARGET_LO = Number(process.env.TARGET_LO ?? 14);
-const TARGET_HI = Number(process.env.TARGET_HI ?? 17);
+const TARGET_LO = Number(process.env.TARGET_LO ?? Math.round(CAP * 0.58));
+const TARGET_HI = Number(process.env.TARGET_HI ?? Math.round(CAP * 0.71));
 const score = (peak) => (peak >= TARGET_LO && peak <= TARGET_HI ? 0 : Math.min(Math.abs(peak - TARGET_LO), Math.abs(peak - TARGET_HI)));
 
 const shortlist = [];

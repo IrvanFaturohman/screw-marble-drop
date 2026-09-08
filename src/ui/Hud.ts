@@ -30,7 +30,7 @@ export class Hud {
         <div class="hud-pill"><b id="hud-boxes">30</b><span>BOXES</span></div>
         <button id="hud-mute" aria-label="mute">${audio.muted ? '🔇' : '🔊'}</button>
       </div>
-      <div id="hud-belt" class="hud-belt"><span id="hud-belt-txt">0/24</span><i id="hud-belt-fill"></i></div>
+      <div id="hud-belt" class="hud-belt"><span id="hud-belt-txt">0/${TUNING.CONVEYOR_CAPACITY}</span><i id="hud-belt-fill"></i></div>
       <div id="hud-level" class="hud-level"></div>
       <div id="hud-hint" class="hud-hint"></div>
       <pre id="hud-debug" class="hud-debug hidden"></pre>

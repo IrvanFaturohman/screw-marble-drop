@@ -8,7 +8,7 @@ procedurally at boot.
 
 One verb: **tap a screw.** A screw at a crossing holds both planks it passes
 through, so pulling it lets go of two things at once — and whatever they were
-carrying pours onto a conveyor that only holds 24.
+carrying pours onto a conveyor that only holds 12.
 
 ```bash
 npm install
@@ -69,7 +69,7 @@ SEE THE WHOLE BOARD  (every screw is tappable)
                      a rear layer becomes visible
                      a magazine is open and 6-12 MARBLES POUR
   -> they collide, spread, bounce off deflectors, funnel back together
-  -> SHARED CONVEYOR (24) -> exposed receivers auto-collect, tik tik tik SNAP
+  -> SHARED CONVEYOR (12) -> exposed receivers auto-collect, tik tik tik SNAP
   -> box closes -> next colour exposed -> belt re-checked
   -> marbles that were stuck suddenly drain
 ```
@@ -140,28 +140,37 @@ change the structure.
 
 ## LEVEL 2 — "SCAFFOLD", the hard one
 
-**8 planks, 15 screws, 10 crossings, 45 marbles.** Same three rules, same
+**8 planks, 18 screws, 10 crossings, 45 marbles.** Same three rules, same
 machine checks. What changes is the pressure:
 
-- **A quarter more stock through a buffer that did not grow.** 45 marbles, still
-  a 24 belt.
+- **Three of the four colours can drown you.** Fifteen red, twelve blue and
+  twelve yellow against a belt of twelve — any one of them, left to pile up
+  while its column is shut, ends the run on its own. LATTICE has exactly one
+  such colour and shows it to you.
 - **The middle rail is last, and its colour is trapped with it.** All five pieces
   on the top layer cross `railMid`, so it is the last plank on the board — and
-  because they all cross it, none of them may share its colour. That forces its
-  nine BLUE to be the entire blue supply: three boxes that cannot be touched
-  until the board is nearly bare.
+  because they all cross it, none of them may share its colour. That forces blue
+  onto the two rails you cannot reach: a debt you take on in the first minute
+  and settle in the last, with no blue box open at t=0 to soften it.
 - **Five planks are free at the first tap**, not four, and none of them is the
-  one you want.
+  one you want. Three of the five are red, and there is one red mouth.
 
-Level 1's best possible play peaks at 12/24 and its verified play-through at
-18/24. Level 2 peaks at **21/24** in the model and **23/24** on real physics —
-one marble of slack. A level allowed to run that tight has to say so: `LevelDef`
-carries a `peakBudget`, and the validator holds each board to its own, rather
-than quietly loosening the rule for everybody.
+Level 1's best possible play peaks at 6/12; level 2's at **9/12** and its
+verified play-through at 12/12. A level allowed to run that tight has to say so:
+`LevelDef` carries a `peakBudget`, and the validator holds each board to its
+own, rather than quietly loosening the rule for everybody.
 
-Finding it took the tuner three tries at the structure. 54 marbles with three
-twelve-marble pours is not winnable at all — 116 model-approved receiver
-orderings were played through the real physics and every one of them lost.
+Played 25 times with **random** taps, waiting for the board to settle between
+each: LATTICE loses 28% of the time, SCAFFOLD 72%.
+
+### Every rail needed a screw of its own
+
+The three rails were held up entirely by the pieces lying across them — every
+screw on them was a joint. So all three left the instant the last upright did,
+and five red, six yellow and nine blue landed in the same moment: twenty marbles
+onto a belt of twelve. The solver called the level unwinnable and it was right.
+Each rail now carries one private screw in a clear span, so it comes off because
+you decided it should.
 
 ### Gravity decides which way a stick swings
 
@@ -184,12 +193,16 @@ first draft of this board that no amount of squinting would have.
 
 ## The decision
 
-Receivers open on **RED / YELLOW / BLUE**. There is no green destination on the
+Receivers open on **YELLOW / RED / BLUE**. There is no green destination on the
 board at t=0 — and `diag`, the one plank that is free to come off first, is
-holding **9 GREEN** in a wedge that spills the moment it drops onto its surviving
-screw. That is 9 marbles of pure debt on a belt of 24, one tap away, and you
-cannot avoid it: `diag` lies across both `topBar` and `midBar`, so nothing else
-on the board can move until it goes.
+holding **6 GREEN** in a wedge that spills the moment it drops onto its surviving
+screw. That is half the belt in pure debt, one tap away, and you cannot avoid it:
+`diag` lies across both `topBar` and `midBar`, so nothing else on the board can
+move until it goes.
+
+Green is also the only colour on that board with **more marbles than the belt can
+hold** — twelve green, twelve slots. Which means green, and only green, can end
+the run on its own.
 
 So the two puzzles argue with each other. *Which support can I remove?* and
 *can the belt take what that spills?* rarely have the same answer.
@@ -309,7 +322,7 @@ A bad tap is never refused. The stick opens and the marbles pour.
 
 **A full belt is not a loss.** It refuses the arriving marble, which queues above
 the entry and keeps trying — and the moment a matching box pulls one off the ring,
-the whole stack drops in behind it. Being at 24/24 is pressure, not death.
+the whole stack drops in behind it. Being at 12/12 is pressure, not death.
 
 What loses is a **jam**: the belt is full AND not one colour on it has an open
 box. Nothing can drain, so no box can complete, so no new colour can ever be
@@ -317,10 +330,22 @@ exposed — a dead end rather than a tight spot. It has to hold for a moment bef
 the run ends, so the pile-up is something you watch arrive. `NO WAY OUT — the belt
 is full and nothing on it fits an open box`.
 
-Win when every magazine is empty, every marble is sorted, the belt is clear and all
-24 boxes are packed — `LEVEL COMPLETE`. The board then comes apart and drops out of
-frame. Both paths were played through in the browser against the real renderer and
-Rapier: **16 taps, peak 18/24** for the win, and a full belt for the loss.
+### A level that cannot be lost is not a level
+
+That rule has a trap in it. Four colours share three receiver columns, so exactly
+one colour is shut out at any moment — which means a jam needs one colour's
+supply to exceed the whole belt. At a capacity of 24 no level came close, and
+both boards were **provably unlosable**: pulling every screw as fast as it lit up
+still won. Nobody noticed, because every test asked whether a level could be won.
+
+So the validator searches for the loss too, plank by plank and shortest first,
+then plays the line it finds on the shipping physics and insists the run really
+ends. LATTICE dies in **8 pulls**, SCAFFOLD in **9** — three uprights, fifteen
+red, one red mouth.
+
+Win when every magazine is empty, every marble is sorted, the belt is clear and
+every box is packed — `LEVEL COMPLETE`. The board then comes apart and drops out
+of frame.
 
 ## Layout (390×844 → 39×84.4 world units)
 
@@ -397,9 +422,12 @@ Also asserted:
 - a plank stripped of all its screws while pinned under another **stays exactly
   where it is and spills nothing of its own**, and is flagged `loose`
 - no two screws closer than a tappable distance
-- colour supply exactly equals receiver demand (R9 B9 Y9 G9 = 36 = 12 boxes)
-- no GREEN receiver at t=0, and the green batch is on the one plank that must
-  come off first — worth >=30% of the buffer
+- colour supply exactly equals receiver demand (G12 R9 Y9 B6 = 36 = 12 boxes)
+- some colour has **no receiver at t=0**, and a batch of that colour is on a
+  plank that is free on turn one — worth >=30% of the buffer
+- **a losing line exists**: a search over pull orders that reaches a full belt
+  with nothing servable on it, replayed on the real physics until the run
+  actually ends
 - **no two overlapping planks within 1.5 depth units share a colour**
 - **a solvability search** over pull orders, and `npm run tune` plays every
   shortlisted receiver stack through the **real Rapier physics** before proposing
@@ -409,12 +437,12 @@ Also asserted:
   closed, every plank dismantled
 - every magazine drains in avg 1.2s with **zero** uses of the rescue net
 - exposing a colour drains stuck marbles with zero input
-- **a full belt with a servable colour survives and drains** (24/24 -> 18/24,
+- **a full belt with a servable colour survives and drains** (12/12 -> 9/12,
   still playing), and marbles refused by it queue instead of being deleted
 - **a belt full of unservable colours is a clean loss** — that, and only that
 - two identical play-throughs match exactly
 
-Measured in-browser against the real renderer and Rapier: **12 taps, peak 18/24,
+Measured in-browser against the real renderer and Rapier: **12 taps, peak 9/12,
 all 7 planks dismantled**, 36 marbles, then a clean restart — matching the
 headless run exactly, since both now use the same driver.
 

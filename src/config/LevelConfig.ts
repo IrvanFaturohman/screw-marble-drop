@@ -47,6 +47,9 @@ export const P = (r: number, a: number) => polar(CX, CY, R(r), a);
 /** Every plank is the same width. A plank is a plank. */
 export const PLANK_W = 3.8;
 
+/** Radius of a stored bead, as drawn. Beads must clear the screw heads. */
+export const PIP_R = 0.65;
+
 export interface Pt { x: number; y: number }
 export const pt = (x: number, y: number): Pt => ({ x, y });
 
@@ -337,27 +340,46 @@ export const LEVEL_1: LevelDef = {
   // Every plank carries something. The four long ones take nine, the three
   // uprights take three — a small spill is a different decision from a big one,
   // and that difference is most of the puzzle.
+  //
+  // GREEN IS THE FLOOD, and it is EXACTLY belt-sized: twelve green against a
+  // belt that holds twelve. So green alone can fill the belt and kill the run,
+  // but only if every last one of it is up there at once — which is a mistake
+  // you have to work at, not one you fall into. Fifteen green made the level
+  // unforgivable: half the board was one colour and the best possible play had
+  // one marble of slack.
+  //
+  // Two planks may not share a colour where they cross, or the weave stops
+  // reading — so green sits on `diag` and `lowBar`, which never touch.
+  //
+  // NO POCKET IS BIGGER THAN HALF THE BELT. Six is a spill you can still
+  // recover from; nine was a coin flip, because a batch lands in full before
+  // anything drains — a nine-pour alone put the best possible play at 9/12
+  // before it had done anything wrong. Pocket counts are no longer all
+  // multiples of three either: only the per-COLOUR total has to divide into
+  // boxes, and 4+5 red reads as two different-sized decisions, not two of the
+  // same one.
   pockets: [
-    { id: 'pkDiag', color: 'green', count: 9, kind: 'wedge', plate: 'diag', releaseAt: 'partial', x: (D1.x + D2.x) / 2, y: (D1.y + D2.y) / 2, cols: 9, spacing: 2.1 },
-    { id: 'pkTop', color: 'red', count: 6, kind: 'tray', plate: 'topBar', releaseAt: 'detached', x: -3, y: TOP_Y, cols: 6, spacing: 2.1 },
+    { id: 'pkDiag', color: 'green', count: 6, kind: 'wedge', plate: 'diag', releaseAt: 'partial', x: (D1.x + D2.x) / 2, y: (D1.y + D2.y) / 2, cols: 6, spacing: 2.1 },
+    { id: 'pkTop', color: 'yellow', count: 6, kind: 'tray', plate: 'topBar', releaseAt: 'detached', x: -3, y: TOP_Y, cols: 6, spacing: 2.1 },
     { id: 'pkMid', color: 'blue', count: 6, kind: 'tray', plate: 'midBar', releaseAt: 'detached', x: -3, y: MID_Y, cols: 6, spacing: 2.1 },
-    { id: 'pkLow', color: 'yellow', count: 6, kind: 'pocketBehind', plate: 'lowBar', releaseAt: 'detached', x: -3, y: LOW_Y, cols: 6, spacing: 2.1 },
-    { id: 'pkVLeft', color: 'yellow', count: 3, kind: 'rotatingCup', plate: 'vLeft', releaseAt: 'detached', x: VL_X, y: 27.5, cols: 3, spacing: 2.1 },
-    { id: 'pkVRight', color: 'red', count: 3, kind: 'rotatingCup', plate: 'vRight', releaseAt: 'detached', x: VR_X, y: 18.5, cols: 3, spacing: 2.1 },
-    { id: 'pkVMid', color: 'blue', count: 3, kind: 'hopper', plate: 'vMid', releaseAt: 'detached', x: VM_X, y: 14.6, cols: 3, spacing: 2.1 },
+    { id: 'pkLow', color: 'green', count: 6, kind: 'pocketBehind', plate: 'lowBar', releaseAt: 'detached', x: -3, y: LOW_Y, cols: 6, spacing: 2.1 },
+    { id: 'pkVLeft', color: 'red', count: 4, kind: 'rotatingCup', plate: 'vLeft', releaseAt: 'detached', x: VL_X, y: 27.5, cols: 4, spacing: 2.1 },
+    { id: 'pkVRight', color: 'red', count: 5, kind: 'rotatingCup', plate: 'vRight', releaseAt: 'detached', x: VR_X, y: 18.5, cols: 5, spacing: 2.1 },
+    { id: 'pkVMid', color: 'yellow', count: 3, kind: 'hopper', plate: 'vMid', releaseAt: 'detached', x: VM_X, y: 14.0, cols: 3, spacing: 2.1 },
 
   ],
 
-  // 24 boxes x 3 = 72 sockets, exactly the marble supply. R7 B7 Y6 G4.
+  // 12 boxes x 3 = 36 sockets, exactly the marble supply. G4 R3 Y3 B2.
   // Found by `npm run tune`; the order colours become available is the real
   // difficulty dial and has to be re-solved whenever a pocket changes colour.
   //
-  // Opening row is BLUE / YELLOW / RED. There is no green destination anywhere
-  // on the board, and diagA — reachable on turn one — is loaded with 9 green.
+  // Opening row is YELLOW / RED / BLUE. There is no green destination on the
+  // board at t=0, and `diag` — reachable on turn one — is loaded with 6 green
+  // against a belt of 12.
   receiverStacks: [
-    ['red', 'red', 'blue', 'green'],
+    ['yellow', 'red', 'yellow', 'green'],
+    ['red', 'red', 'green', 'green'],
     ['blue', 'blue', 'yellow', 'green'],
-    ['yellow', 'green', 'yellow', 'red'],
   ],
 
   guides: [
@@ -372,17 +394,20 @@ export const LEVEL_1: LevelDef = {
  * Same three rules as LEVEL 1, enforced the same way: every crossing pinned, no
  * plank sandwiched, nothing buried. What changes is the pressure.
  *
- *   54 MARBLES ON THE SAME 24 BELT. Half again as much stock through a buffer
- *   that did not grow.
+ *   45 MARBLES ON THE SAME 12 BELT. A quarter more stock than LATTICE through a
+ *   buffer that did not grow.
+ *
+ *   FIFTEEN RED AND ONE RED MOUTH. All three red uprights are free from the
+ *   first tap and there are three sockets to put fifteen marbles in. Drop all
+ *   three and the belt is twelve red with nowhere to go — nine pulls to a dead
+ *   run, and the shortest loss on the board.
  *
  *   THE MIDDLE RAIL IS LAST, AND ITS COLOUR IS TRAPPED WITH IT. Every one of the
  *   five pieces on the top layer crosses `railMid`, so it is the last plank on
  *   the board. And because every one of them crosses it, none of them may share
- *   its colour — which forces its twelve BLUE to be the entire blue supply.
- *   Four blue boxes that cannot be touched until the board is nearly bare.
- *
- *   TWELVE IN ONE POUR. Each rail carries a full twelve, half the belt at once,
- *   and a rail only pours when its last screw is out.
+ *   its colour — which forces its nine BLUE to be the entire blue supply. Three
+ *   blue boxes that cannot be touched until the board is nearly bare, and then
+ *   nine marbles at once onto a belt of twelve.
  */
 const L2_TOP = 32, L2_MID = 24, L2_LOW = 16;
 const L2_UA = -13, L2_UB = -7, L2_UC = 3, L2_UD = 15;   // the four uprights
@@ -391,7 +416,9 @@ const L2_DA = pt(7.5, 13), L2_DB = pt(10.5, 25);        // the one diagonal
 export const LEVEL_2: LevelDef = {
   id: 'scaffold',
   name: 'SCAFFOLD',
-  // Hard on purpose: the best possible play still fills 7/8 of the belt.
+  // Hard on purpose. The best line peaks at 9/12 — three quarters of the belt
+  // on the last pour alone — and this says the level is allowed to run that
+  // tight where an ordinary level is held to 85%.
   peakBudget: 0.9,
 
   plates: [
@@ -469,25 +496,67 @@ export const LEVEL_2: LevelDef = {
     { id: 's2cOwn', plate: 'upC', x: L2_UC, y: 20 },
     { id: 's2dOwn', plate: 'upD', x: L2_UD, y: 28 },
     { id: 's2gOwn', plate: 'diag', x: 9.25, y: 20 },
+
+    // ONE PRIVATE SCREW PER RAIL, in the clear span between two crossings.
+    //
+    // Without these, every screw on a rail is a joint — so the rail is held up
+    // entirely by the pieces lying across it and leaves the instant the last of
+    // them does. All three rails then dropped together on the final upright:
+    // five red, six yellow and nine blue arriving in the same instant, twenty
+    // marbles onto a belt that holds twelve. That is not a hard level, it is an
+    // unsolvable one, and the solver said so.
+    //
+    // With them, each rail comes off because you decided it should.
+    { id: 's2tOwn', plate: 'railTop', x: 0, y: L2_TOP },
+    { id: 's2mOwn', plate: 'railMid', x: 6.5, y: L2_MID },
+    { id: 's2lOwn', plate: 'railLow', x: -11, y: L2_LOW },
   ],
 
-  // 54 marbles. BLUE exists only on `railMid`, the last plank on the board.
+  // 45 marbles, and THREE OF THE FOUR COLOURS CAN DROWN YOU.
+  //
+  // Fifteen red, twelve blue and twelve yellow against a belt of twelve: any of
+  // them, left to pile up while its column is shut, ends the run on its own.
+  // LATTICE has exactly one such colour and shows it to you; here every
+  // decision is the dangerous one. That is what makes this the hard level, far
+  // more than the extra planks.
+  //
+  // NOTHING CARRIES MORE THAN IT CAN SHOW. A nine-unit upright with three screw
+  // heads on it has room for about two visible beads and hard room for five; a
+  // thirty-unit rail has room for eight. Load an upright with six and the
+  // hardware eats them, and the rule the board rests on — what you can see in a
+  // stick is what pulling its screws will spill — quietly stops being true.
+  //
+  // BLUE IS THE BAIT AND A FLOOD AT ONCE, and it lives only on the two rails
+  // you cannot reach until the board is nearly bare. No blue box is open at
+  // t=0, `railMid` is the last plank standing, and twelve blue is the whole
+  // belt: a debt you take on in the first minute and settle in the last.
   pockets: [
-    { id: 'p2Top', color: 'red', count: 9, kind: 'tray', plate: 'railTop', releaseAt: 'detached', x: -2, y: L2_TOP, cols: 9, spacing: 2.1 },
-    { id: 'p2Mid', color: 'blue', count: 9, kind: 'tray', plate: 'railMid', releaseAt: 'detached', x: -2, y: L2_MID, cols: 9, spacing: 2.1 },
-    { id: 'p2Low', color: 'yellow', count: 9, kind: 'pocketBehind', plate: 'railLow', releaseAt: 'detached', x: -1, y: L2_LOW, cols: 9, spacing: 2.1 },
+    { id: 'p2Top', color: 'blue', count: 6, kind: 'tray', plate: 'railTop', releaseAt: 'detached', x: -2, y: L2_TOP, cols: 6, spacing: 2.1 },
+    { id: 'p2Mid', color: 'blue', count: 6, kind: 'tray', plate: 'railMid', releaseAt: 'detached', x: -2, y: L2_MID, cols: 6, spacing: 2.1 },
+    { id: 'p2Low', color: 'yellow', count: 8, kind: 'pocketBehind', plate: 'railLow', releaseAt: 'detached', x: -1, y: L2_LOW, cols: 8, spacing: 2.1 },
     { id: 'p2Diag', color: 'green', count: 6, kind: 'wedge', plate: 'diag', releaseAt: 'partial', x: (L2_DA.x + L2_DB.x) / 2, y: (L2_DA.y + L2_DB.y) / 2, cols: 6, spacing: 2.1 },
-    { id: 'p2UpA', color: 'green', count: 3, kind: 'rotatingCup', plate: 'upA', releaseAt: 'detached', x: L2_UA, y: 30, cols: 3, spacing: 2.1 },
-    { id: 'p2UpB', color: 'red', count: 3, kind: 'rotatingCup', plate: 'upB', releaseAt: 'detached', x: L2_UB, y: 18, cols: 3, spacing: 2.1 },
-    { id: 'p2UpC', color: 'red', count: 3, kind: 'rotatingCup', plate: 'upC', releaseAt: 'detached', x: L2_UC, y: 18, cols: 3, spacing: 2.1 },
-    { id: 'p2UpD', color: 'yellow', count: 3, kind: 'hopper', plate: 'upD', releaseAt: 'detached', x: L2_UD, y: 30, cols: 3, spacing: 2.1 },
+    { id: 'p2UpA', color: 'yellow', count: 4, kind: 'rotatingCup', plate: 'upA', releaseAt: 'detached', x: L2_UA, y: 28, cols: 4, spacing: 2.1 },
+    { id: 'p2UpB', color: 'red', count: 5, kind: 'rotatingCup', plate: 'upB', releaseAt: 'detached', x: L2_UB, y: 20, cols: 5, spacing: 2.1 },
+    { id: 'p2UpC', color: 'red', count: 5, kind: 'rotatingCup', plate: 'upC', releaseAt: 'detached', x: L2_UC, y: 20, cols: 5, spacing: 2.1 },
+    { id: 'p2UpD', color: 'red', count: 5, kind: 'hopper', plate: 'upD', releaseAt: 'detached', x: L2_UD, y: 28, cols: 5, spacing: 2.1 },
   ],
 
-  // 18 boxes x 3 = 54. Re-solved by `npm run tune -- --level 2`.
+  // 15 boxes x 3 = 45. Re-solved by `npm run tune -- --level 2`.
+  //
+  // BLUE IS LAST IN EVERY COLUMN, because blue only exists on `railMid` and
+  // `railMid` is the last plank on the board. That is not a coincidence to be
+  // tuned away — it is the level.
+  //
+  // AND ONLY ONE RED MOUTH IS OPEN AT THE START. Fifteen red sit on three
+  // uprights that are all free from the first tap, and three sockets to put
+  // them in — so dropping all three is twelve red on a belt of twelve with
+  // nowhere to go, which is the whole loss. Opening red on every column instead
+  // (the obvious-looking layout) drains nine of them for free and makes the
+  // level unlosable; `npm run validate` says so out loud now.
   receiverStacks: [
-    ['yellow', 'red', 'red', 'blue', 'yellow'],
-    ['red', 'green', 'red', 'red', 'green'],
-    ['blue', 'green', 'yellow', 'blue', 'yellow'],
+    ['red', 'yellow', 'red', 'yellow', 'blue'],
+    ['green', 'red', 'yellow', 'red', 'blue'],
+    ['yellow', 'red', 'green', 'blue', 'blue'],
   ],
 
   guides: [
@@ -525,12 +594,79 @@ export function colorDemand(level: LevelDef): Record<string, number> {
   return out;
 }
 
-/** Marble slot offsets inside a pocket, filled bottom row first. */
-export function pocketSlot(p: PocketDef, index: number) {
-  const cols = p.cols;
-  const rows = Math.ceil(p.count / cols);
+/**
+ * Where a plank's screws sit ALONG the plank, measured from its pocket anchor.
+ *
+ * A bead drawn under a screw head is a bead the player cannot see, and the rule
+ * this board is built on is that what you can see loaded in a stick is exactly
+ * what pulling its screws will spill. On the long rails there is room for both;
+ * on a nine-unit upright carrying three screws there is not, and the beads
+ * simply vanished under the hardware.
+ *
+ * Derived from geometry like everything else here: a screw is on the plank if
+ * it falls inside the plank's outline, whatever the level file claims.
+ */
+const layoutCache = new Map<string, { blocked: number[]; min: number; max: number }>();
+export function pocketLayout(level: LevelDef, pk: PocketDef) {
+  const key = `${level.id}/${pk.id}`;
+  const hit = layoutCache.get(key);
+  if (hit) return hit;
+  const pl = level.plates.find((p) => p.id === pk.plate)!;
+  const rot = pl.rot ?? 0, c = Math.cos(rot), sn = Math.sin(rot);
+  const shape = pl.shape as { w?: number; h?: number };
+  const halfW = (shape.h ?? 4) / 2, halfL = (shape.w ?? 0) / 2;
+  const axial = (x: number, y: number) => (x - pl.x) * c + (y - pl.y) * sn;
+  const across = (x: number, y: number) => -(x - pl.x) * sn + (y - pl.y) * c;
+  const anchor = axial(pk.x, pk.y);
+  const blocked: number[] = [];
+  for (const sc of level.screws) {
+    if (Math.abs(across(sc.x, sc.y)) > halfW) continue;
+    if (Math.abs(axial(sc.x, sc.y)) > halfL) continue;
+    blocked.push(axial(sc.x, sc.y) - anchor);
+  }
+  const out = { blocked, min: -halfL - anchor, max: halfL - anchor };
+  layoutCache.set(key, out);
+  return out;
+}
+
+/**
+ * Marble slot offsets inside a pocket, filled bottom row first.
+ *
+ * With a `layout` it lays the row out in the CLEAR SPANS between the screws:
+ * every candidate position on the spacing grid that clears a screw head is
+ * collected, and the run actually needed is the innermost `count` of them. So
+ * the row still reads as centred on its anchor, and no bead hides.
+ */
+export function pocketSlot(
+  p: PocketDef,
+  index: number,
+  layout?: { blocked: number[]; min: number; max: number },
+) {
   const s = p.spacing ?? LAYOUT.pocketSpacing;
   const i = p.count - 1 - index; // drain from the bottom up
+
+  if (layout && p.count <= p.cols) {
+    const clear = LAYOUT.screwR + PIP_R + 0.15;
+    const free: number[] = [];
+    const reach = Math.ceil((p.count / 2 + layout.blocked.length + 2));
+    for (let k = -reach; k <= reach; k++) {
+      const u = k * s;
+      if (u < layout.min || u > layout.max) continue;
+      if (layout.blocked.some((b) => Math.abs(u - b) < clear)) continue;
+      free.push(u);
+    }
+    if (free.length >= p.count) {
+      const use = free
+        .slice()
+        .sort((a, b) => Math.abs(a) - Math.abs(b))
+        .slice(0, p.count)
+        .sort((a, b) => a - b);
+      return { dx: use[i], dy: 0 };
+    }
+  }
+
+  const cols = p.cols;
+  const rows = Math.ceil(p.count / cols);
   const r = Math.floor(i / cols);
   const c = i % cols;
   return {
