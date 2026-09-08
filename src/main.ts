@@ -51,21 +51,12 @@ const harness = {
       angleDeg: +((p.angle * 180) / Math.PI).toFixed(1),
     }));
   },
-  /** Every sand reservoir: how much is left, how much is piled at its throat. */
-  reservoirs() {
-    return game.model.sand.reservoirs.map((r) => ({
-      id: r.id, color: r.color, state: r.state,
-      left: +r.remaining.toFixed(1), of: r.total,
-      pile: +r.pile.toFixed(1),
+  pockets() {
+    return game.model.source.pockets.map((p) => ({
+      id: p.id, color: p.color, left: p.pending, of: p.total,
+      kind: p.def.kind, plate: p.def.plate, at: p.def.releaseAt, open: p.open,
     }));
   },
-  /** The shared channel, per colour. */
-  buffer() {
-    const s = game.model.sand;
-    return { percent: +s.bufferPercent.toFixed(1), volume: +s.bufferVolume.toFixed(1),
-             byColor: s.bufferByColor(), runs: s.segments.length };
-  },
-
   /** Await it: the scene is rebuilt asynchronously. */
   restart() { return game.restart(); },
   /** Win -> next board, lose -> the same one again. Await it. */

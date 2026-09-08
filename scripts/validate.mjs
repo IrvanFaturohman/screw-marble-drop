@@ -2,7 +2,7 @@
  * Level validator + headless play-through.
  *
  * Runs the SHIPPING simulation (src/game/*.ts, bundled by esbuild) in Node with
- * the shipping flow network, so every claim is checked against the same plank /
+ * the scripted marble driver, so every claim is checked against the same plate /
  * screw / conveyor / receiver code the phone runs.
  *
  * The load-bearing checks are the ones nobody can eyeball on a layered
@@ -51,10 +51,10 @@ function check(name, ok, detail = '') {
   return false;
 }
 const C = { g: '\x1b[32m', r: '\x1b[31m', d: '\x1b[90m', x: '\x1b[0m', b: '\x1b[1m' };
-const CAP = TUNING.BUFFER_CAPACITY;
+const CAP = TUNING.CONVEYOR_CAPACITY;
 const RCAP = TUNING.RECEIVER_CAPACITY;
 
-console.log(`\n${C.b}SCREW SAND FLOW — level validator${C.x}`);
+console.log(`\n${C.b}SCREW MARBLE DROP — level validator${C.x}`);
 console.log(`level: ${LEVEL.id} "${LEVEL.name}"  —  ${LEVEL.plates.length} plates, ${LEVEL.screws.length} screws, ${LEVEL.pockets.length} pockets\n`);
 
 const src = new SourceModel(LEVEL);
@@ -125,7 +125,7 @@ console.log(`${C.b}STRUCTURE${C.x}`);
   const sig = new Set(LEVEL.plates.map((p) => JSON.stringify(p.shape)));
   check('plates are not all the same shape', sig.size >= 4, `only ${sig.size} distinct shapes`);
   // A woven lattice is bars by design, and the failure the brief calls out is a
-  // plank wide enough to read as a sand BOX. Every piece must read as a plank,
+  // plate wide enough to read as a marble box. Every piece must read as a STICK,
   // and their lengths must vary or the board is just a bundle.
   const aspects = LEVEL.plates.map((p) => {
     const b = shapeBox(p.shape);
@@ -194,7 +194,7 @@ for (const p of src.plates) {
 console.log(`\n${C.b}OCCLUSION${C.x}  (the picture and the rules must say the same thing)`);
 
 // 4b. Every bead in a magazine has to sit ON its stick. A row that runs off the
-//     end reads as sand spilling beside the board — and it is the one
+//     end reads as loose marbles floating beside the board — and it is the one
 //     layout error that survives every other check, because the rules never
 //     touch the row's geometry.
 {
@@ -317,20 +317,21 @@ console.log(`\n${C.b}POCKETS${C.x}`);
   console.log(`  ${LEVEL.pockets.length} pockets, ${kinds.size} container types: ${[...kinds].join(', ')}`);
 
   for (const pk of LEVEL.pockets) {
-    // A reservoir has to hold a readable amount: less than a fifth of a jar is
-    // not worth a structural decision, more than three jars cannot be absorbed.
-    check(`reservoir ${pk.id} holds 20..300 units`, pk.volume >= 20 && pk.volume <= 300, `${pk.volume}`);
-    // And it has to physically fit along the plank that holds it, because the
-    // visible length of the sand column IS how the player estimates the volume.
+    // Three is the small spill an upright carries; nine is what a long plank
+    // holds. The difference between them is the decision.
+    check(`magazine ${pk.id} batch size is 3-12`, pk.count >= 3 && pk.count <= 12, `${pk.count}`);
+    // The batch has to physically fit inside the plate that holds it, or the
+    // player cannot see what a screw is going to spill.
     const plate = plateOf(pk.plate);
-    const box = shapeBoxRot(plate.def.shape, 0);
-    const plankLen = box.maxX - box.minX;
-    check(`reservoir ${pk.id} fits along ${pk.plate}`, pk.span <= plankLen - 1.2,
-      `span ${pk.span} on a ${plankLen.toFixed(1)} plank`);
-    // The outlet must be genuinely NARROW relative to what feeds it — that
-    // ratio is the reason sand piles up instead of draining like water.
-    check(`reservoir ${pk.id} outlet is a throat, not a hole`,
-      TUNING.OUTLET_WIDTH <= 0.32, `outlet is ${(TUNING.OUTLET_WIDTH * 100).toFixed(0)}% of the reservoir`);
+    let inside = 0;
+    const anchor = toLocal(plate.transform, pk.x, pk.y);
+    for (let i = 0; i < pk.count; i++) {
+      const s = pocketSlot(pk, i);
+      const [wx, wy] = M.toWorld(plate.transform, anchor[0] + s.dx, anchor[1] + s.dy);
+      if (containsWorld(plate.def.shape, plate.transform, wx, wy, TUNING.MARBLE_RADIUS * 0.35)) inside++;
+    }
+    check(`pocket ${pk.id} sits inside plate ${pk.plate}`, inside >= Math.ceil(pk.count * 0.8),
+      `only ${inside}/${pk.count} marbles are within the plate outline`);
   }
 
   // THE failure condition for this revision: if every screw reliably spills a
@@ -367,11 +368,11 @@ for (const c of new Set([...Object.keys(supply), ...Object.keys(demand)])) {
   check(`colour balance ${c}`, (supply[c] ?? 0) === (demand[c] ?? 0),
     `supply ${supply[c] ?? 0} vs demand ${demand[c] ?? 0}`);
 }
-const totalSand = Object.values(supply).reduce((a, b) => a + b, 0);
+const totalMarbles = Object.values(supply).reduce((a, b) => a + b, 0);
 const totalBoxes = LEVEL.receiverStacks.reduce((n, c) => n + c.length, 0);
-console.log(`  supply ${JSON.stringify(supply)} = ${totalSand} units of sand`);
+console.log(`  supply ${JSON.stringify(supply)} = ${totalMarbles} marbles`);
 console.log(`  demand ${JSON.stringify(demand)} = ${totalBoxes} boxes x ${RCAP}`);
-check('total sand volume is 600..2000 units', totalSand >= 600 && totalSand <= 2000, `${totalSand}`);
+check('total marbles 36-90', totalMarbles >= 36 && totalMarbles <= 90, `${totalMarbles}`);
 {
   const open0 = new Set(LEVEL.receiverStacks.map((c) => c[0]));
   check('no GREEN receiver at t=0 (the core tension)', !open0.has('green'), [...open0].join(','));
@@ -382,260 +383,265 @@ check('total sand volume is 600..2000 units', totalSand >= 600 && totalSand <= 2
     return pk.color === 'green' && plate.screws.some((sc) => acc0.has(sc.id));
   });
   check('a GREEN batch is one tap away at t=0 (the bait exists)', earlyGreen.length > 0);
-  const debt = earlyGreen.reduce((n, p) => n + p.volume, 0);
-  check('that green costs a real slice of the channel', debt >= CAP * 0.3, `${debt} vs capacity ${CAP}`);
-  console.log(`  green bait from t=0: ${earlyGreen.map((p) => p.id).join(',')} = ${debt} units of pure debt`);
+  const debt = earlyGreen.reduce((n, p) => n + p.count, 0);
+  check('that green costs a real slice of the buffer', debt >= CAP * 0.3, `${debt} vs capacity ${CAP}`);
+  console.log(`  green bait from t=0: ${earlyGreen.map((p) => p.id).join(',')} = ${debt} marbles of pure debt`);
 }
 
 // ------------------------------------------------------------------ solver ---
-//
-// With sand there is nothing left to approximate. Whether a level overflows
-// depends on RATES and TIMING — how fast a reservoir feeds its throat, how long
-// a colour sits in the channel with nowhere to go — none of which a count model
-// can represent. The old marble solver was a count model, and it disagreed with
-// the physics often enough that the play-through had to try several of its
-// answers before one worked.
-//
-// The flow network is deterministic and cheap, so the solver simply PLAYS THE
-// GAME. Greedy, with a few different tie-breaks, and every candidate order is a
-// real play-through. What it proves is exactly what matters: a winning order
-// exists on the shipping simulation.
-console.log(`\n${C.b}SOLVER${C.x}  (greedy over the real flow network)`);
+console.log(`\n${C.b}SOLVER${C.x}  (conservative: every batch lands before draining)`);
+function solve() {
+  const screws = LEVEL.screws.map((s) => s.id);
+  const idx = new Map(screws.map((s, i) => [s, i]));
 
-const settled = (g) =>
-  g.source.plates.every((p) => p.state !== 'partial' || p.t >= 1);
-
-/**
- * One greedy play. `bias` reorders the candidates so different runs explore
- * different openings.
- */
-function play(bias) {
-  const g = new GameModel(LEVEL);
-  const order = [];
-  let t = 0, peak = 0, stable = 0, lastBuf = -1, quiet = 0;
-  while (g.phase === 'play' && t < 600000) {
-    const buf = g.sand.bufferVolume;
-    if (Math.abs(buf - lastBuf) < 0.05) stable += 1000 / 120; else { stable = 0; lastBuf = buf; }
-
-    // Only decide when the board has stopped moving and the channel has stopped
-    // changing — a player watching the sand would do the same.
-    if (settled(g) && stable > 420) {
-      const open = g.source.accessible();
-      if (open.length) {
-        const exposed = g.sand.exposedColors();
-        const free = g.sand.bufferFree;
-        const scored = open.map((sc) => {
-          // What would this pull actually release? Any plank it holds that has
-          // exactly one screw left is about to go.
-          let vol = 0, wanted = 0;
-          for (const pl of g.source.platesByScrew.get(sc.id) ?? []) {
-            if (pl.screws.length > 1) continue;
-            for (const pk of g.source.pockets) {
-              if (pk.def.plate !== pl.id || pk.open) continue;
-              const res = g.sand.byId.get(pk.def.id);
-              const v = res ? res.remaining : pk.def.volume;
-              vol += v;
-              if (exposed.has(pk.color)) wanted += v;
-            }
-          }
-          // Prefer a pull the channel can absorb, and prefer colours that have
-          // somewhere to go. A pull that spills nothing is always safe.
-          const risk = Math.max(0, vol - wanted) - free;
-          return { sc, key: risk * 1000 + (bias.get(sc.id) ?? 0) };
-        }).sort((a, b) => a.key - b.key);
-        g.pull(scored[0].sc);
-        order.push(scored[0].sc.id);
-        stable = 0;
+  const drain = (st) => {
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (let ci = 0; ci < st.cols.length; ci++) {
+        const col = st.cols[ci], stack = LEVEL.receiverStacks[ci];
+        if (col.i >= stack.length) continue;
+        const color = stack[col.i];
+        while (st.belt[color] > 0 && col.filled < RCAP) { st.belt[color]--; col.filled++; moved = true; }
+        if (col.filled >= RCAP) { col.i++; col.filled = 0; moved = true; }
       }
     }
-    g.update(1000 / 120);
-    t += 1000 / 120;
-    peak = Math.max(peak, g.sand.bufferVolume);
-    if (g.source.remaining().length === 0 && g.sand.idle) {
-      quiet += 1000 / 120;
-      if (quiet > 1200) break;
-    } else quiet = 0;
-  }
-  return { g, order, peak, t };
-}
+  };
+  const total = (b) => b.red + b.blue + b.yellow + b.green;
 
-const solved = (() => {
-  let best = null;
-  const rng = (n) => { let x = n; return () => (x = (x * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff; };
-  for (let attempt = 0; attempt < 14; attempt++) {
-    const r = rng(attempt * 7919 + 13);
-    const bias = new Map(LEVEL.screws.map((sc) => [sc.id, attempt === 0 ? 0 : r() * 900]));
-    const res = play(bias);
-    if (!best || (res.g.phase === 'won' && best.g.phase !== 'won')
-        || (res.g.phase === 'won' && res.peak < best.peak)) best = { ...res, attempt };
-    if (best.g.phase === 'won' && best.peak < TUNING.BUFFER_CAPACITY * 0.75) break;
-  }
-  return best;
-})();
+  // A COUNT MODEL, not a replay.
+  //
+  // Every screw is tappable now, so the branching factor went from four to
+  // thirteen — and the old solver rebuilt a whole SourceModel and re-simulated
+  // the prefix at every node, which turned a two-second search into one that
+  // never finished. The structure is simple enough to model exactly: a screw
+  // holds a known set of planks, a plank leaves at zero screws unless something
+  // still lies on it, and leaving can free whatever it was pinning.
+  const PL = src.plates.map((p, i) => ({
+    i, id: p.id, z: p.z, screws: p.screws.length,
+    hasPartial: p.def.partial !== 'none',
+    pockets: LEVEL.pockets.filter((k) => k.plate === p.id),
+  }));
+  const pIdx = new Map(PL.map((p) => [p.id, p.i]));
+  const holds = LEVEL.screws.map((sc) => (src.platesByScrew.get(sc.id) ?? []).map((pl) => pIdx.get(pl.id)));
+  const above = PL.map((p) => (src.overlapsWith.get(p.id) ?? []).filter((q) => q.z > p.z).map((q) => pIdx.get(q.id)));
 
-check('a winning pull order exists', solved.g.phase === 'won',
-  `no order won in 14 greedy attempts — ended "${solved.g.phase}"`);
-{
-  const pct = (solved.peak / CAP) * 100;
-  console.log(`  won on attempt ${solved.attempt + 1}: ${solved.order.length} pulls, `
-    + `${(solved.t / 1000).toFixed(1)}s, channel peaked at ${pct.toFixed(0)}%`);
-  const budget = (LEVEL.peakBudget ?? 0.85) * 100;
-  check(`best play leaves headroom (peak <= ${Math.round(budget)}%)`, pct <= budget, `peak ${pct.toFixed(0)}%`);
-  check('best play still has to use the channel (peak >= 25%)', pct >= 25, `peak ${pct.toFixed(0)}%`);
-  if (VERBOSE) console.log('  order: ' + solved.order.join(' '));
-}
-
-console.log(`\n${C.b}PLAY-THROUGH${C.x}  (that order, replayed)`);
-{
-  const g = solved.g;
-  check('the level completes', g.phase === 'won', `ended "${g.phase}"`);
-  check('every reservoir emptied', g.sand.sourceLeft < 0.5, `${g.sand.sourceLeft.toFixed(1)} units still in the structure`);
-  check('nothing left in a pile or the funnel', g.sand.inFlight < 0.5, `${g.sand.inFlight.toFixed(1)} units stuck`);
-  check('the channel drained', g.sand.bufferVolume < 0.5, `${g.sand.bufferVolume.toFixed(1)} units stuck`);
-  check('the board fully dismantled', g.source.platesLeft === 0, `${g.source.platesLeft} planks left`);
-  check('every jar reached 100%', g.sand.columns.flat().every((r) => r.fill >= TUNING.RECEIVER_CAPACITY - 0.5),
-    g.sand.columns.flat().filter((r) => r.fill < TUNING.RECEIVER_CAPACITY - 0.5).map((r) => `${r.id}:${r.fill.toFixed(0)}`).join(','));
-  console.log(`  ${g.taps} pulls, ${(solved.t / 1000).toFixed(1)}s simulated, `
-    + `${g.sand.receiversTotal} jars filled`);
-}
-
-// ------------------------------------------------------------------- flow ---
-//
-// The whole point of the revision: material must ARRIVE faster than it can
-// LEAVE, or nothing ever piles up.
-console.log(`\n${C.b}FLOW RATES${C.x}  (the inequality that makes a pile)`);
-{
-  check('source outruns its own outlet', TUNING.SOURCE_FLOW_RATE > TUNING.MAIN_THROAT_FLOW_RATE * 1.4,
-    `source ${TUNING.SOURCE_FLOW_RATE} vs throat ${TUNING.MAIN_THROAT_FLOW_RATE}`);
-  check('the outlet is the tightest point in the chain',
-    TUNING.MAIN_THROAT_FLOW_RATE < TUNING.BUFFER_INPUT_RATE,
-    `throat ${TUNING.MAIN_THROAT_FLOW_RATE} vs neck ${TUNING.BUFFER_INPUT_RATE}`);
-  check('a jar drains faster than one throat fills it',
-    TUNING.RECEIVER_DRAIN_RATE > TUNING.MAIN_THROAT_FLOW_RATE,
-    `jar ${TUNING.RECEIVER_DRAIN_RATE} vs throat ${TUNING.MAIN_THROAT_FLOW_RATE}`);
-
-  // And prove it actually happens: open one reservoir and watch a pile build.
-  const g = new GameModel(LEVEL);
-  const pk = g.source.pockets.find((p) => p.def.volume >= 100);
-  g.source.debugOpenPocket(pk);
-  const res = g.sand.byId.get(pk.def.id);
-  let maxPile = 0, firstFlowAt = -1, tt = 0;
-  while (tt < 45000 && res.state !== 'empty') {
-    g.update(1000 / 120); tt += 1000 / 120;
-    maxPile = Math.max(maxPile, res.pile);
-    if (firstFlowAt < 0 && g.sand.bufferVolume > 0.5) firstFlowAt = tt;
-  }
-  check('opening a reservoir builds a visible pile', maxPile >= 12, `peak pile ${maxPile.toFixed(1)} units`);
-  check('sand does not teleport into the channel', firstFlowAt > 250, `first arrival at ${firstFlowAt.toFixed(0)}ms`);
-  check('the pile drains away completely', res.pile < 0.5, `${res.pile.toFixed(1)} left`);
-  console.log(`  ${pk.def.id}: peak pile ${maxPile.toFixed(0)} units, first sand reached the channel at ${(firstFlowAt / 1000).toFixed(2)}s`);
-}
-
-// ------------------------------------------------------- accumulation ---
-//
-// ACCEPTANCE B and C, mechanised: sand must reach the outlet faster than it can
-// leave, build a visible pile, and keep draining after the source runs dry.
-console.log(`\n${C.b}ACCUMULATION${C.x}  (per reservoir)`);
-{
-  const rows = [];
-  let worstPile = Infinity, anySettle = 0;
-  for (const pk of LEVEL.pockets) {
-    const g = new GameModel(LEVEL);
-    // Every jar open, so nothing backs up for a reason other than the throat.
-    g.sand.columns.flat().forEach((r) => { r.state = 'active'; });
-    const target = g.source.pockets.find((p) => p.def.id === pk.id);
-    g.source.debugOpenPocket(target);
-    const res = g.sand.byId.get(pk.id);
-    let maxPile = 0, emptyAt = -1, pileGoneAt = -1, tt = 0;
-    while (tt < 60000) {
-      g.update(1000 / 120); tt += 1000 / 120;
-      maxPile = Math.max(maxPile, res.pile);
-      if (emptyAt < 0 && res.remaining <= 0) emptyAt = tt;
-      if (emptyAt >= 0 && pileGoneAt < 0 && res.pile <= 0.4) { pileGoneAt = tt; break; }
+  /** Apply a pull to a state, cascading anything it frees. Returns the spill. */
+  function applyPull(rem, gone, si) {
+    const spill = { red: 0, blue: 0, yellow: 0, green: 0 };
+    const opened = (pi, wasRem) => {
+      const p = PL[pi];
+      const partialNow = p.hasPartial && p.screws >= 2 ? rem[pi] <= 1 : rem[pi] === 0;
+      const wasPartial = p.hasPartial && p.screws >= 2 ? wasRem <= 1 : wasRem === 0;
+      for (const k of p.pockets) {
+        const fires = k.releaseAt === 'partial' ? partialNow && !wasPartial : gone[pi] === 1;
+        if (fires && !k.__done) spill[k.color] += k.count;
+      }
+    };
+    for (const pi of holds[si]) {
+      if (gone[pi]) continue;
+      const wasRem = rem[pi];
+      if (rem[pi] > 0) rem[pi]--;
+      opened(pi, wasRem);
     }
-    const settle = pileGoneAt - emptyAt;
-    worstPile = Math.min(worstPile, maxPile);
-    anySettle = Math.max(anySettle, settle);
-    rows.push(`  ${pk.id.padEnd(10)} ${String(pk.volume).padStart(4)}u  peak pile ${maxPile.toFixed(0).padStart(3)}u`
-      + `  drained ${(settle / 1000).toFixed(1)}s after the source ran dry`);
-    check(`${pk.id} builds a pile before it drains`, maxPile >= Math.min(12, pk.volume * 0.25),
-      `peak pile only ${maxPile.toFixed(1)} units`);
-    check(`${pk.id} keeps draining after its source is empty`, settle > 200,
-      `pile vanished ${settle.toFixed(0)}ms after the source emptied`);
+    // Anything at zero screws and no longer pinned leaves — and that may free
+    // the next one down, so keep going until nothing moves.
+    let moved = true;
+    while (moved) {
+      moved = false;
+      for (const p of PL) {
+        if (gone[p.i] || rem[p.i] > 0) continue;
+        if (above[p.i].some((qi) => !gone[qi])) continue;
+        gone[p.i] = 1; moved = true;
+        for (const k of p.pockets) if (k.releaseAt !== 'partial') spill[k.color] += k.count;
+      }
+    }
+    return spill;
   }
-  rows.forEach((r) => console.log(r));
-  console.log(`  tightest pile ${worstPile.toFixed(0)} units; longest tail ${(anySettle / 1000).toFixed(1)}s`);
+
+  let explored = 0;
+  const CAP_STATES = 400000;
+  /**
+   * Collect SEVERAL orders, not just the first.
+   *
+   * The count model is optimistic — it treats the belt as a multiset, where the
+   * real belt is a circulating queue. Its favourite order can therefore lose on
+   * the real physics while a different order at the same peak wins. So gather a
+   * handful and let the play-through decide which one is real.
+   */
+  const WANT = 16;
+  const attempt = (limit) => {
+    const seen = new Set();
+    const path = [];
+    const found = [];
+    let bestPeak = 0;
+    const dfs = (mask, rem, gone, belt, cols, peak) => {
+      if (found.length >= WANT) return true;
+      if (explored > CAP_STATES) return false;
+      if (mask === (1 << screws.length) - 1) {
+        if (total(belt) === 0 && gone.every((g) => g)) {
+          found.push([...path]); bestPeak = Math.max(bestPeak, peak);
+          return found.length >= WANT;
+        }
+        return false;
+      }
+      const key = `${mask}|${belt.red},${belt.blue},${belt.yellow},${belt.green}|` + cols.map((c) => `${c.i}:${c.filled}`).join(',');
+      if (seen.has(key)) return false;
+      seen.add(key); explored++;
+
+      for (let i = 0; i < screws.length; i++) {
+        if (mask & (1 << i)) continue;
+        if (!holds[i].some((pi) => !gone[pi])) continue;
+        const nrem = rem.slice(), ngone = gone.slice();
+        const spill = applyPull(nrem, ngone, i);
+        const after = total(belt) + spill.red + spill.blue + spill.yellow + spill.green;
+        if (after > limit) continue;
+        const nb = { ...belt };
+        for (const c of ['red', 'blue', 'yellow', 'green']) nb[c] += spill[c];
+        const nc = cols.map((x) => ({ ...x }));
+        drain({ belt: nb, cols: nc });
+        path.push(screws[i]);
+        if (dfs(mask | (1 << i), nrem, ngone, nb, nc, Math.max(peak, after))) return true;
+        path.pop();
+      }
+      return false;
+    };
+    const belt0 = { red: 0, blue: 0, yellow: 0, green: 0 };
+    const cols0 = LEVEL.receiverStacks.map(() => ({ i: 0, filled: 0 }));
+    drain({ belt: belt0, cols: cols0 });
+    dfs(0, PL.map((p) => p.screws), PL.map(() => 0), belt0, cols0, 0);
+    return found.length ? { orders: found, order: found[0], peak: bestPeak } : null;
+  };
+
+  for (let limit = 9; limit <= CAP; limit += 3) {
+    const r = attempt(limit);
+    if (r) return { ...r, explored };
+  }
+  return { order: null, peak: 0, explored };
+}
+
+const solved = solve();
+check('an overflow-free pull order exists', !!solved.order,
+  `explored ${solved.explored} states with no solution — the level is unwinnable`);
+if (solved.order) {
+  console.log(`  best play peaks at ${solved.peak}/${CAP}, ${solved.order.length} pulls, ${solved.explored} states`);
+  const budget = LEVEL.peakBudget ?? 0.85;
+  check(`optimal play leaves headroom (peak <= ${Math.round(budget * 100)}% of capacity)`,
+    solved.peak <= CAP * budget, `peak ${solved.peak}/${CAP}`);
+  check('optimal play still has to use the buffer (peak >= 30%)', solved.peak >= CAP * 0.3, `peak ${solved.peak}/${CAP}`);
+  if (VERBOSE) console.log('  order: ' + (solved.playOrder ?? solved.order).join(' '));
+}
+
+// ---------------------------------------------------------- play-through ---
+console.log(`\n${C.b}PLAY-THROUGH${C.x}  (solved order, real simulation)`);
+const settled = (g) =>
+  g.airborne === 0 && g.source.plates.every((p) => p.state !== 'partial' || p.t >= 1) &&
+  g.source.pockets.every((p) => !p.open || p.drained);
+
+{
+  // THE REAL PHYSICS, not the scripted stand-in. The belt is a circulating queue
+  // and a receiver only takes from the exit gate, so which box closes first
+  // depends on the order marbles actually land in — and Rapier orders them
+  // differently from the count model that proposed the order. So try the orders
+  // the solver found, in turn, and report the first that actually wins. The
+  // claim being proved is "an order exists that wins on the shipping physics",
+  // which is the only claim worth making.
+  const driver = await RapierDriver.create(LEVEL);
+  const orders = solved.orders ?? [LEVEL.screws.map((s) => s.id)];
+  let result = null, tried = 0;
+  for (const order of orders) {
+    driver.reset();
+    const g = new GameModel(LEVEL, driver);
+    let t = 0, peak = 0, i = 0, quiet = 0, stable = 0, lastLoad = -1;
+    const ids = new Set();
+    while (g.phase === 'play' && t < 400000) {
+      if (g.sorting.load === lastLoad) stable += 1000 / 60; else { stable = 0; lastLoad = g.sorting.load; }
+      if (i < order.length && settled(g) && stable > 500) {
+        const s = g.source.screwById.get(order[i]);
+        if (g.source.isAccessible(s)) { g.pull(s); i++; stable = 0; }
+      }
+      g.update(1000 / 60); t += 1000 / 60;
+      peak = Math.max(peak, g.sorting.load);
+      for (const m of g.marbles) ids.add(m.id);
+      if (i >= order.length && g.source.allEmpty && g.sorting.idle && g.airborne === 0) {
+        quiet += 1000 / 60;
+        if (quiet > 2500) break;
+      } else quiet = 0;
+    }
+    tried++;
+    if (!result || g.phase === 'won') result = { g, peak, t, ids, order };
+    if (g.phase === 'won') break;
+  }
+  const { g, peak, t, ids } = result;
+  check('the level completes', g.phase === 'won',
+    `no winning order among the ${tried} the solver proposed — ended "${g.phase}"`);
+  check('every pocket emptied', g.source.marblesLeft === 0, `${g.source.marblesLeft} marbles still in the sculpture`);
+  check('every marble accounted for', ids.size === totalMarbles, `${ids.size} of ${totalMarbles}`);
+  check('the board fully dismantled', g.source.platesLeft === 0, `${g.source.platesLeft} planks left`);
+  check('conveyor drained', g.sorting.load === 0, `${g.sorting.load} stuck`);
+  check('a patient player never fills the belt', peak < CAP, `live peak ${peak}/${CAP}`);
+  console.log(`  ${g.taps} pulls, ${(t / 1000).toFixed(1)}s simulated, ${ids.size} marbles, live peak ${peak}/${CAP}`
+    + (tried > 1 ? `  (order ${tried} of ${orders.length} tried)` : ''));
+  solved.playOrder = result.order;
+  if (VERBOSE) console.log('  winning order: ' + result.order.join(' '));
+}
+
+// --------------------------------------------------------------- flight ---
+console.log(`\n${C.b}FLIGHT${C.x}  (no marble may rely on the rescue net)`);
+{
+  const g = new GameModel(LEVEL);
+  g.sorting.columns.flat().forEach((r) => { r.state = 'active'; });
+  const flights = [];
+  let rescued = 0;
+  for (const pk of g.source.pockets) {
+    g.source.debugOpenPocket(pk);
+    const start = g.elapsed;
+    let guard = 0;
+    while (guard++ < 4000) {
+      g.update(1000 / 60);
+      const air = g.marbles.some((m) => m.origin === pk.id && (m.state === 'falling' || m.state === 'intake'));
+      if (pk.pending === 0 && !air) break;
+    }
+    const ms = g.elapsed - start;
+    flights.push(ms);
+    if (ms >= TUNING.MARBLE_RESCUE_MS) rescued++;
+    g.sorting.belt.length = 0;
+    g.marbles.length = 0;
+  }
+  const avg = flights.reduce((a, b) => a + b, 0) / flights.length;
+  console.log(`  ${flights.length} pockets, avg ${avg.toFixed(0)}ms to fully drain, slowest ${Math.max(...flights).toFixed(0)}ms, ${rescued} needed the net`);
+  check('no batch relies on the rescue net', rescued === 0, `${rescued} did`);
+  check('a batch drains fast enough to keep a tap cadence (<4s)', Math.max(...flights) < 4000, `${Math.max(...flights).toFixed(0)}ms`);
+  check('a batch takes long enough to read as a cascade (>700ms)', Math.min(...flights) > 700, `${Math.min(...flights).toFixed(0)}ms`);
 }
 
 // ---------------------------------------------------------------- chain ---
-console.log(`\n${C.b}CHAIN + OVERFLOW${C.x}`);
+console.log(`\n${C.b}CHAIN + BLOCKED + OVERFLOW${C.x}`);
 {
-  // ACCEPTANCE E and F: a colour with no jar must sit in the channel and must
-  // start draining on its own the moment one opens — with no further input.
   const g = new GameModel(LEVEL);
   const greenPk = g.source.pockets.find((p) => p.color === 'green');
   g.source.debugOpenPocket(greenPk);
-  for (let k = 0; k < 5000; k++) g.update(1000 / 120);
-  const stuck = g.sand.bufferByColor().green;
-  check('green with no jar stays in the channel', stuck > 5, `only ${stuck.toFixed(1)} units held`);
-  check('and none of it was quietly deleted',
-    Math.abs(stuck + g.sand.byId.get(greenPk.def.id).remaining + g.sand.inFlight - greenPk.def.volume) < 2,
-    `${stuck.toFixed(1)} in channel vs ${greenPk.def.volume} authored`);
-
-  const greenCol = g.sand.columns.findIndex((c) => c.some((r) => r.color === 'green'));
-  check('some jar column reaches green', greenCol >= 0, 'no green destination anywhere');
+  for (let k = 0; k < 900; k++) g.update(1000 / 60);
+  check('a green batch with no receiver stays on the belt', g.sorting.load === greenPk.total,
+    `belt ${g.sorting.load}, expected ${greenPk.total}`);
+  const before = g.sorting.load;
   let guard = 0;
-  while (greenCol >= 0 && !g.sand.activeReceivers().some((r) => r.color === 'green') && guard++ < 12) {
-    const a = g.sand.columns[greenCol].find((r) => r.state === 'active');
+  // Advance whichever column actually reaches green — it is not always the
+  // first one, and the tuner is free to move it.
+  const greenCol = g.sorting.columns.findIndex((c) => c.some((r) => r.color === 'green'));
+  check('some receiver column reaches green', greenCol >= 0, 'no green destination anywhere');
+  while (greenCol >= 0 && !g.sorting.activeReceivers().some((r) => r.color === 'green') && guard++ < 12) {
+    const a = g.sorting.columns[greenCol].find((r) => r.state === 'active');
     if (!a) break;
-    a.fill = TUNING.RECEIVER_CAPACITY; a.inlet = 0; a.state = 'completing';
-    g.sand.advanceColumn(a);
+    a.filled = RCAP; a.state = 'completing'; g.sorting.advanceColumn(a);
   }
-  const before = g.sand.bufferByColor().green;
   let drainedAt = -1;
-  for (let k = 0; k < 4000; k++) {
-    g.update(1000 / 120);
-    if (drainedAt < 0 && g.sand.bufferByColor().green <= before - 5) drainedAt = (k * 1000) / 120;
+  for (let k = 0; k < 1500; k++) {
+    g.update(1000 / 60);
+    if (drainedAt < 0 && g.sorting.load <= before - 3) drainedAt = (k * 1000) / 60;
   }
-  check('exposing GREEN drains it with zero further input', drainedAt > 0,
-    `channel still holds ${g.sand.bufferByColor().green.toFixed(1)}`);
-  console.log(`  ${before.toFixed(0)} units of stuck green -> draining ${(drainedAt / 1000).toFixed(2)}s after a jar opened`);
-}
-{
-  // ACCEPTANCE J: congestion has to be watchable, and then it has to end.
-  const g = new GameModel(LEVEL);
-  // Congestion needs a colour with nowhere to go. If every colour happens to be
-  // exposed at t=0, close one jar first so there genuinely is a dead colour —
-  // otherwise the fill just drains and the test proves nothing.
-  const dead = ['green', 'red', 'blue', 'yellow']
-    .find((c) => !g.sand.exposedColors().has(c));
-  if (!dead) {
-    const victim = g.sand.activeReceivers()[0];
-    victim.fill = TUNING.RECEIVER_CAPACITY; victim.state = 'completing';
-    g.sand.advanceColumn(victim);
-  }
-  g.debugFillBuffer(0.86);
-  const start = g.sand.bufferPercent;
-  // The bad decision is opening a colour with NOWHERE TO GO. Opening a big
-  // reservoir whose jar is already open is not congestion — it drains straight
-  // through, which is the system working.
-  const stuckColors = g.sand.exposedColors();
-  const big = g.source.pockets.filter((p) => !p.open && !stuckColors.has(p.color))
-    .sort((a, b) => b.def.volume - a.def.volume)[0]
-    ?? g.source.pockets.filter((p) => !p.open).sort((a, b) => b.def.volume - a.def.volume)[0];
-  g.source.debugOpenPocket(big);
-  let rose = 0;
-  // Measure the RISE, over the first few seconds — long enough for the sand to
-  // arrive, short enough that the jars have not had time to rotate and rescue
-  // the situation. Whether it eventually recovers is the level being fair; that
-  // it visibly backs up first is what the player has to be able to see.
-  for (let k = 0; k < 1400 && g.phase === 'play'; k++) {
-    g.update(1000 / 120);
-    rose = Math.max(rose, g.sand.bufferPercent - start);
-  }
-  check('a bad decision is never refused', big.open);
-  check('the channel visibly backs up', rose > 3, `only rose ${rose.toFixed(1)} points`);
-  console.log(`  filled to ${start.toFixed(0)}%, opened ${big.def.id} (${big.def.volume}u) -> rose ${rose.toFixed(0)} points in 12s`);
+  check('exposing GREEN drains the stuck marbles with zero input', drainedAt > 0, `belt ${g.sorting.load} (was ${before})`);
+  console.log(`  ${before} stuck green -> first three drained in ${(drainedAt / 1000).toFixed(2)}s`);
 }
 {
   // Nothing is buried, so there is no such thing as a refused tap. The gate is
@@ -661,27 +667,29 @@ console.log(`\n${C.b}CHAIN + OVERFLOW${C.x}`);
   }
 }
 {
-  // A bad tap must never be refused. Strip a loaded plank to its LAST screw,
-  // fill the channel, then pull — the sand has to actually pour and the loss
-  // has to be watchable rather than a refusal at the tap.
+  // A bad tap must never be refused, and it must lose cleanly.
+  //
+  // Strip a free, loaded plank down to its LAST screw first, then fill the belt,
+  // then pull. Filling first and pulling "the first accessible screw" proves
+  // nothing on a board where most pulls only change the structure.
   const g = new GameModel(LEVEL);
+  // It has to be a `detached` magazine: a `partial` one pours the moment the
+  // plank drops to one screw, i.e. during the stripping, and then the final pull
+  // spills nothing and the test proves nothing.
   const target = g.source.plates.find((pl) => !g.source.trappedBy(pl) && pl.screws.length >= 2
     && g.source.pockets.some((pk) => pk.def.plate === pl.id && pk.def.releaseAt === 'detached'));
   check('some loaded plank is free to strip', !!target);
   for (const sc of target.screws.slice(0, -1)) g.pull(sc);
   for (let k = 0; k < 400; k++) g.update(1000 / 60);
   const shot = target.screws[0];
-  g.debugFillBuffer(0.9);
-  const shotOk = g.pull(shot);
-  check('the pull is ALLOWED even though it will overflow', shotOk && (shot.unscrewing || shot.removed));
-  // ... and then open EVERYTHING. The jars drain fast enough to survive one bad
-  // pull on a nearly-full channel, which is the level being fair; they cannot
-  // survive the whole board arriving at once, which is the level being losable.
-  for (const pk of g.source.pockets) g.source.debugOpenPocket(pk);
-  for (let k = 0; k < 9000 && g.phase === 'play'; k++) g.update(1000 / 120);
-  check('overflow triggers a clean loss', g.phase === 'lost', `phase ${g.phase}, channel ${g.sand.bufferPercent.toFixed(0)}%`);
-  for (let k = 0; k < 600; k++) g.update(1000 / 120);
-  check('the simulation is stable after the loss', g.sand.bufferVolume <= CAP + 0.5);
+  g.debugFillConveyor(CAP);
+  check('belt filled to capacity', g.sorting.load === CAP, `${g.sorting.load}`);
+  g.pull(shot);
+  check('the pull is ALLOWED even though it may overflow', shot.unscrewing || shot.removed);
+  for (let k = 0; k < 1400; k++) g.update(1000 / 60);
+  check('overflow triggers a clean loss', g.phase === 'lost', `phase ${g.phase}, belt ${g.sorting.load}`);
+  for (let k = 0; k < 600; k++) g.update(1000 / 60);
+  check('the simulation is stable after the loss', g.sorting.load <= CAP);
 }
 
 // --------------------------------------------------------- determinism ---
@@ -692,8 +700,7 @@ console.log(`\n${C.b}DETERMINISM${C.x}`);
     const order = solved.order ?? [];
     let i = 0, stable = 0, lastLoad = -1;
     for (let k = 0; k < 14000 && g.phase === 'play'; k++) {
-      const buf = g.sand.bufferVolume;
-      if (Math.abs(buf - lastLoad) < 0.05) stable += 1000 / 60; else { stable = 0; lastLoad = buf; }
+      if (g.sorting.load === lastLoad) stable += 1000 / 60; else { stable = 0; lastLoad = g.sorting.load; }
       if (i < order.length && settled(g) && stable > 500) {
         const s = g.source.screwById.get(order[i]);
         if (g.source.isAccessible(s)) { g.pull(s); i++; stable = 0; }

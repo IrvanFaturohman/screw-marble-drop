@@ -1,93 +1,142 @@
-# Screw Sand Flow
+# Screw Marble Drop
 
 ### ▶ [Play it](https://irvanfaturohman.github.io/screw-marble-drop/) — best on a phone, portrait
 
-Mobile-first hybrid-casual prototype. TypeScript + Vite + **Three.js**, 390×844
-portrait, no backend, no asset files — every mesh, texture and sound is generated
+Mobile-first hybrid-casual prototype. TypeScript + Vite + **Three.js + Rapier 3D**,
+390×844 portrait, no backend, no asset files — every mesh, texture and sound is generated
 procedurally at boot.
 
 One verb: **tap a screw.** A screw at a crossing holds both planks it passes
-through, so pulling it lets go of two things at once — and the coloured sand
-inside them starts pouring.
+through, so pulling it lets go of two things at once — and whatever they were
+carrying pours onto a conveyor that only holds 24.
 
 ```bash
 npm install
-npm run dev            # http://localhost:5176
-npm run build          # tsc --noEmit && vite build
-npm run validate:all   # both boards: every rule, a solver, a full play-through
-npm run validate -- --level 2   # just the second board
-npm run joints                  # every crossing, and what each screw holds
-npm run inspect                 # the board layer by layer
+npm run dev        # http://localhost:5176
+npm run build      # tsc --noEmit && vite build
+npm run validate   # headless: every rule, a solvability search, a play-through
+npm run validate -- --level 2     # ... on the second board
+npm run validate -- -v            # print the solved pull order
+npm run inspect                   # the board layer by layer
+npm run joints                    # every crossing, and what each screw holds
+npm run tune -- --level 2         # re-solve level 2's receiver order
+npm run tune                      # search receiver stacks for a target difficulty
+npm run tune -- --colours         # solve the pocket-colour graph
 ```
 
 ---
 
-## The revision: marbles became sand
+## What changed, and why — four times
 
-The old loop was **screw → gate → 9 marbles drop → receiver fills 0/3**. Nine
-discrete objects is a countable amount, a countable amount wants a countable
-readout, and the whole thing settles into ordinary Marble Sort.
+**First revision** replaced one-screw-one-marble with batch release: the screw
+became a trigger that poured nine marbles at once.
 
-The new loop is **screw → gate → sand pours → sand PILES UP → squeezes through a
-throat → collects again above the neck → enters the channel → a matching jar
-fills 0% to 100%**.
+**This revision** fixes what that left behind. The source was ten identical
+chambers in a 5x2 grid, each with one big screw on its face. That is a marble
+box with a screw sprite on it — normal Marble Sort wearing a costume. The screw
+was a colour button.
 
-### The one inequality that makes a pile
-
-Everything about the accumulation comes from three numbers being in this order,
-and the validator refuses a build where they are not:
+So the whole upper half was rebuilt as a real screw structure. A screw is now a
+STRUCTURAL SUPPORT and nothing else:
 
 ```
-SOURCE_FLOW_RATE   46   what a reservoir pushes toward its own outlet
-MAIN_THROAT_RATE   17   what that outlet actually passes      <-- the pinch
-BUFFER_INPUT_RATE  38   what the shared neck passes
-RECEIVER_DRAIN     26   what one jar pulls out of the channel
+STICK    long thin bars laid over each other on ten depth layers, each pinned by
+         1-2 screws. Lose one support and it swings about the survivor; lose the
+         last and it leaves, in an authored way (fall / swing / slide).
+SCREW    sits at a real joint — a stick's end, or a crossing where one stick
+         pins another. It may be physically covered by a stick in FRONT of it.
+MAGAZINE a row of marbles held IN a stick. It spills because the stick carrying
+         it opened. Never because a button was pressed.
 ```
 
-A reservoir pushes 46 units a second at a hole that passes 17. The other 29 have
-nowhere to go, so they **stack** — and the mound the player watches grow is that
-number, not an animation. Measured on level 1: `pkDiag` (300 units) peaks at a
-**189-unit pile** and keeps draining for **11 seconds after its source runs dry**.
-Set the two rates equal and the sand drains like water and the revision is
-pointless, which is why it is an assertion and not a comment.
+The proof that this is not a colour button, measured by simulation rather than
+asserted: **8 of the 13 pulls in this level spill nothing at all.** They only
+change the structure. Every plank needs two or more screws, so no single screw
+owns a batch.
 
-The last rate matters too. A jar that out-drains the neck means a mismatched
-colour never backs up: opening every reservoir at once peaked the channel at
-**13%**, which is not a decision. Below it, the same move is a real overflow.
+Everything below the board was kept: marble physics, funnel, shared
+conveyor, capacity, receiver stacks, colour matching, win/fail, restart, camera,
+mobile layout.
 
-### Three layers, and only the first one is real
+## The loop
 
 ```
-VOLUME     reservoir.remaining, reservoir.pile, funnel[], segment.volume,
-           receiver.fill        <- gameplay. Deterministic. What validate plays.
-FLOW       min(available, rate * dt, destinationCapacity) between fixed nodes.
-GRAINS     a recycled pool of instanced quads and a cone per mound.
+SEE THE WHOLE BOARD  (every screw is tappable)
+  -> TAP ONE -> it spins out toward you and fades where it was
+  -> the stick it held loses a support
+  -> SWINGS about its remaining screw, or LEAVES the board entirely
+  -> one or more of: a screw underneath is uncovered
+                     a rear layer becomes visible
+                     a magazine is open and 6-12 MARBLES POUR
+  -> they collide, spread, bounce off deflectors, funnel back together
+  -> SHARED CONVEYOR (24) -> exposed receivers auto-collect, tik tik tik SNAP
+  -> box closes -> next colour exposed -> belt re-checked
+  -> marbles that were stuck suddenly drain
 ```
 
-A grain is a *view* of volume. Losing one loses nothing; the pool recycles the
-oldest whenever a pour outruns it. That separation is why the tools can play a
-whole level in Node and be right about the phone.
+One verb. **Tap a screw.**
 
-### There is no physics engine any more
+## The board — "LADDER"
 
-Sand is a flow network, so Rapier went out with the marbles — **2 MB of WASM
-removed**, and the bundle dropped from 765 KB gzipped to 166 KB. It also closed
-the last modelling gap: the old validator had to try several of its solver's
-answers because the count model and the real physics disagreed. Now the solver
-*is* the simulation, and it is a greedy play with a few different openings.
+**7 planks, 12 screws, 7 crossings, 36 marbles**, mounted on one wooden board
+with spare holes drilled along the bottom.
 
-### Percentages, not counts
+**Fourth revision, and it is the one that fixed the reading.** Three rules came
+straight out of how a real screw board looks, and all three are enforced:
 
-One jar is 100 units, so `receiver.fill` **is** the percentage. The visible sand
-column in the jar is the same number scaled to the jar's height, so the picture
-and the label cannot drift apart, and the HUD eases the channel reading toward
-the truth rather than jumping.
+**Every crossing is pinned.** Two planks may not simply lie across each other
+with nothing holding the joint — on a real board the crossing IS where the screw
+goes. This is also what keeps the plank count honest: the ten-plank weave crossed
+itself **thirty-three times**, and thirty-three screws is not a puzzle, it is a
+nail bomb. Seven planks cross seven times, and `npm run joints` prints any
+crossing left bare.
 
-### What did not change
+**Nothing is buried.** The camera looks straight down, so every screw head is a
+circle and every plank its true rectangle. Because a screw at a joint is driven
+through the topmost plank there, it is always visible — there is no such thing
+as a hidden screw, and every screw on the board is tappable.
 
-The board is still the woven screw puzzle from the previous revisions, with
-every rule still enforced: every crossing pinned, no plank sandwiched, nothing
-buried, supports derived from geometry. Sand replaced the payoff, not the puzzle.
+**So the gate is physical.** A plank with no screws left still cannot move while
+another plank lies across it. It goes `loose` — it lifts a little and breathes —
+and drops the moment the one on top of it goes. That replaces the old
+hidden-screw occlusion with a dependency you can simply *see*.
+
+**And no plank may be sandwiched.** A plank tucked under one neighbour and lying
+over another reads as if it bends: its two ends disagree about whether it is
+above or below the board, and from a dead-on camera there is no cue to settle it.
+Five of the seven planks did exactly that in the first pass. So the board is
+**two layers and only two** — three cross-pieces lying flat, four pieces laid
+across them — which makes every plank either above EVERYTHING it crosses or
+below everything it crosses. Planks inside a layer never overlap, so their z only
+breaks depth-sort ties and is invisible.
+
+| layer | plank | holds | crosses |
+|---|---|---|---|
+| **over** | `diag` — the one diagonal | GREEN ×9 | topBar, midBar |
+| **over** | `vLeft` | YELLOW ×3 | topBar, midBar |
+| **over** | `vRight` | RED ×3 | midBar, lowBar |
+| **over** | `vMid` | BLUE ×3 | lowBar |
+| **under** | `topBar` | RED ×6 | *(pinned by diag, vLeft)* |
+| **under** | `midBar` | BLUE ×6 | *(pinned by diag, vLeft, vRight)* |
+| **under** | `lowBar` | YELLOW ×6 | *(pinned by vRight, vMid)* |
+
+The three uprights deliberately cross **different pairs** of cross-pieces. When
+two of them crossed the same pair, the four-colouring had no solution at all —
+each cross-piece has to share its colour with the one upright that does *not*
+cross it.
+
+### A screw at a joint holds both planks
+
+Which screws hold which plank is **derived from geometry**, never listed: a screw
+passes through every plank it physically sits on. Seven of the twelve sit on a
+crossing and therefore hold two planks at once, so one pull lets go of two things
+— and that shared joint is most of the puzzle. The other five are each a plank's
+own private screw, in the clear span between cross-pieces, so a plank comes off
+because you decided to take it off rather than as a side effect.
+
+The four `over` planks are reachable straight away; the three underneath wait
+for whatever is lying on them. **7 of 12 pulls spill nothing at all** — they only
+change the structure.
 
 ## LEVEL 2 — "SCAFFOLD", the hard one
 
@@ -305,38 +354,58 @@ That is a dev-server plugin (`vite.config.ts`), and it is why the renderer sets
 
 ## Verification
 
-`npm run validate:all` bundles the *shipping* simulation with esbuild and plays
-both boards in Node. There is no renderer and no physics engine, so what it runs
-is exactly what the phone runs.
+`npm run validate` bundles the *shipping* simulation with esbuild and runs it in
+Node — same planks, same dependency graph, same conveyor, same receivers as the
+browser, and for the play-through **the same Rapier physics**. `RapierDriver`
+imports only Rapier and config, never Three, so it runs headless.
 
-**146 assertions on level 1, 164 on level 2.** The load-bearing ones:
+That last part is load-bearing. The belt is a circulating queue and a receiver
+only takes from the exit gate, so which box closes first depends on the order
+marbles physically land in — and the scripted stand-in orders them differently
+from Rapier. A level tuned against the stand-in passed every check here and then
+deadlocked in the browser with a full belt and three receivers all waiting on a
+colour that had not arrived yet. `npm run tune` now plays every shortlisted
+candidate through the real simulation before proposing it: in the last search,
+**63 of 240 model-approved stacks lost for real.**
 
-- **the flow rates form a pile** — source outruns its own outlet by 1.4x or more,
-  the outlet is the tightest point in the chain, and a jar drains slower than the
-  neck fills so a mismatched colour genuinely backs up
-- **every reservoir actually piles before it drains**, measured per reservoir:
-  open it, watch the mound, and require both a real peak and a tail after the
-  source empties
-- **sand does not teleport** — the first grain may not reach the channel inside
-  250 ms of a gate opening
-- **every crossing is pinned** and **no plank is sandwiched** (unchanged)
-- a colour with no jar stays in the channel, is not quietly deleted, and starts
-  draining on its own the moment a jar for it opens — with no further input
-- **a bad decision is never refused**: fill the channel, pull anyway, watch it
-  back up, and lose cleanly
-- supply exactly equals demand per colour (300 units each = 3 jars each)
-- a full greedy play-through on the real flow network: every reservoir emptied,
-  every pile drained, the channel empty, every jar at 100%
-- two identical play-throughs match exactly
+**120 assertions on level 1, 135 on level 2.** The load-bearing ones are the two that keep the picture and
+the rules saying the same thing:
 
-Measured in-browser: **12 taps, 62 s, channel peaked at 58%, 1200 units drained,
-all 12 jars at 100%** — matching the headless run exactly.
+- **every crossing is pinned** — two planks may not lie across each other with
+  no screw at the joint. Re-derived from the geometry, not from the level file
+- **no plank is sandwiched** — every plank is above everything it crosses or
+  below everything it crosses, so its two ends can never disagree
+- **the board can actually come apart** — walk the trapped-plank dependency and
+  prove every plank, screw and magazine is eventually reachable
 
-Draw calls went 172 → 136 along the way. Two findings worth keeping: one pane of
-`transmission` glass on a jar makes Three re-render the whole scene into a
-transmission target every frame (99 ms → 35 ms when removed), and the five meshes
-that made up each screw are now one merged geometry with the colours in the
-vertices.
+Also asserted:
+
+- every plank overlaps a neighbour; **every plank reads as a plank, none as a
+  slab** (minimum aspect 2.8 — the old build's marble-box tray was 2.0)
+- **which screws hold which plank is derived from geometry**, so a screw cannot
+  be listed as holding a plank it does not physically sit on; 8 of 13 hold two
+- **no magazine hangs on a single screw**, and every plank needs 2+
+- **every bead physically fits inside the plank that holds it**
+- a plank stripped of all its screws while pinned under another **stays exactly
+  where it is and spills nothing of its own**, and is flagged `loose`
+- no two screws closer than a tappable distance
+- colour supply exactly equals receiver demand (R9 B9 Y9 G9 = 36 = 12 boxes)
+- no GREEN receiver at t=0, and the green batch is on the one plank that must
+  come off first — worth >=30% of the buffer
+- **no two overlapping planks within 1.5 depth units share a colour**
+- **a solvability search** over pull orders, and `npm run tune` plays every
+  shortlisted receiver stack through the **real Rapier physics** before proposing
+  it — the scripted stand-in reported a peak of 17 for a level that really peaks
+  at 22
+- a full play-through **on the real Rapier physics**: 36 marbles, every box
+  closed, every plank dismantled
+- every magazine drains in avg 1.2s with **zero** uses of the rescue net
+- exposing a colour drains stuck marbles with zero input
+- overflow loses cleanly; two identical play-throughs match exactly
+
+Measured in-browser against the real renderer and Rapier: **12 taps, peak 18/24,
+all 7 planks dismantled**, 36 marbles, then a clean restart — matching the
+headless run exactly, since both now use the same driver.
 
 ## What is deliberately absent
 

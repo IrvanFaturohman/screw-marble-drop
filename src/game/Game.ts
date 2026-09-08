@@ -2,10 +2,11 @@ import * as THREE from 'three';
 import { LAYOUT, TUNING } from '../config/GameConfig';
 import { LEVELS } from '../config/LevelConfig';
 import { GameModel } from './GameModel';
+import { RapierDriver } from '../physics/RapierDriver';
 import { World } from '../three/World';
 import { StructureView } from '../three/StructureView';
 import { TrackView } from '../three/TrackView';
-import { SandView } from '../three/SandView';
+import { MarbleView } from '../three/MarbleView';
 import { ReceiverView } from '../three/ReceiverView';
 import { Juice } from '../three/Juice';
 import { Hud } from '../ui/Hud';
@@ -24,9 +25,7 @@ export class Game {
   private world: World;
   private structure!: StructureView;
   private track!: TrackView;
-  private sand!: SandView;
-  /** Volume that crossed a throat this frame; drives the pour hiss. */
-  private pourLoudness = 0;
+  private marbles!: MarbleView;
   private receivers!: ReceiverView;
   private juice!: Juice;
   private hud: Hud;
@@ -60,16 +59,17 @@ export class Game {
 
   private async build() {
     const level = this.level;
-    this.model = new GameModel(level);
+    const driver = await RapierDriver.create(level);
+    this.model = new GameModel(level, driver);
     this.ended = false;
 
     this.structure = new StructureView(this.model);
     this.track = new TrackView(this.model, level);
-    this.sand = new SandView(this.model);
+    this.marbles = new MarbleView(this.model);
     this.receivers = new ReceiverView(this.model);
     this.juice = new Juice();
 
-    this.world.root.add(this.structure.group, this.track.group, this.receivers.group, this.sand.group, this.juice.points);
+    this.world.root.add(this.structure.group, this.track.group, this.receivers.group, this.marbles.mesh, this.juice.points);
     this.wireEvents();
     this.hud.reset();
     this.hud.setLevel(this.levelIndex + 1, LEVELS.length, level.name);
@@ -77,17 +77,16 @@ export class Game {
     debugPanel.attach({
       restart: () => this.restart(),
       releaseBatch: () => {
-        const pk = this.model.source.pockets.find((x) => !x.open);
+        const pk = this.model.source.pockets.find((x) => !x.open && !x.drained);
         if (pk) this.model.source.debugOpenPocket(pk);
       },
-      clearConveyor: () => this.model.debugClearBuffer(),
-      fillConveyor: () => this.model.debugFillBuffer(0.9),
-      completeExposed: () => this.model.debugCompleteExposed(),
+      clearConveyor: () => this.model.debugClearConveyor(),
+      fillConveyor: () => this.model.debugFillConveyor(TUNING.CONVEYOR_CAPACITY - 2),
+      completeExposed: () => this.model.sorting.debugCompleteExposed(),
       toggleDebug: () => { this.showDebug = !this.showDebug; this.hud.setDebug(this.showDebug); },
       stats: () => {
         const s = this.model.state();
-        return `${this.fps.toFixed(0)}fps  buffer ${s.buffer}  grains ${this.sand.liveGrains}`
-          + `  sand ${s.sandInStructure.toFixed(0)}  flight ${s.inFlight.toFixed(0)}  recv ${s.receiversLeft}`;
+        return `${this.fps.toFixed(0)}fps  belt ${s.belt}  air ${s.airborne}  rack ${s.marblesInRack}  boxes ${s.boxesLeft}`;
       },
     });
   }
@@ -119,12 +118,19 @@ export class Game {
       this.structure.pocketWorld(pk, this.tmp);
       this.juice.burst(this.tmp.x, this.tmp.y, this.tmp.z, pk.color, 10, 14);
     };
+    m.events.onRelease = (_pk, marble) => {
+      // One clatter per few marbles — nine individual pops would be mush.
+      if (marble.id % 3 === 0) audio.tick(0.35 + Math.random() * 0.3);
+    };
     m.events.onUnlocked = () => { audio.reveal(); };
-    // Sand is continuous, so its sound is too: one running hiss whose level
-    // follows how much is actually crossing throats, not a click per grain.
-    m.events.onThroatFlow = (r, v) => { this.pourLoudness += v; this.sand.emitThroat(r, v); };
-    m.events.onNeckFlow = (c, v) => { this.pourLoudness += v * 0.4; this.sand.emitNeck(c, v); };
-    m.events.onReceiverFlow = (r, v) => this.sand.emitReceiver(r, v);
+    m.events.onMarbleLanded = () => { audio.land(); };
+    m.events.onSocketFilled = (r, i) => {
+      audio.snap(i); haptics.snap(i);
+      this.receivers.onSocketFilled(r);
+      const p = { x: LAYOUT.recvColX[r.column] + (i - 1) * LAYOUT.recvSocketDX, y: LAYOUT.recvBoxY + LAYOUT.recvSocketDY };
+      this.juice.burst(p.x, p.y, LAYOUT.beltZ + 1, r.color, 5, 9);
+      this.hud.dismissHint();
+    };
     m.events.onReceiverComplete = (r) => {
       audio.complete(); haptics.complete();
       this.receivers.onComplete(r);
@@ -132,9 +138,9 @@ export class Game {
     };
     m.events.onReceiverExposed = (r) => {
       audio.reveal();
-      const waiting = Math.round(m.sand.bufferByColor()[r.color] ?? 0);
+      const waiting = m.sorting.belt.filter((b) => b.color === r.color).length;
       // The chain the whole design is built around — call it out once, briefly.
-      if (waiting > 2) this.hud.flashHint(`${r.color.toUpperCase()} OPEN — ${waiting} DRAINING`);
+      if (waiting > 0) this.hud.flashHint(`${r.color.toUpperCase()} OPEN — ${waiting} draining`);
     };
     m.events.onWin = () => this.finish(true);
     m.events.onLose = () => this.finish(false);
@@ -158,13 +164,13 @@ export class Game {
     key('Digit4', () => { TUNING.GAME_SPEED = 4; debugPanel.sync(); });
     key('KeyB', () => { const s2 = this.model.source.accessible()[0]; if (s2) this.model.pull(s2); });
     key('KeyM', () => {
-      const pk = this.model.source.pockets.find((x) => !x.open);
+      const pk = this.model.source.pockets.find((x) => !x.open && !x.drained);
       if (pk) this.model.source.debugOpenPocket(pk);
     });
     key('KeyS', () => { this.showDebug = !this.showDebug; this.hud.setDebug(this.showDebug); });
-    key('KeyF', () => this.model.debugFillBuffer(0.9));
-    key('KeyC', () => this.model.debugClearBuffer());
-    key('KeyN', () => this.model.debugCompleteExposed());
+    key('KeyF', () => this.model.debugFillConveyor(TUNING.CONVEYOR_CAPACITY - 2));
+    key('KeyC', () => this.model.debugClearConveyor());
+    key('KeyN', () => this.model.sorting.debugCompleteExposed());
     key('KeyD', () => { this.showDebug = !this.showDebug; this.hud.setDebug(this.showDebug); });
     key('KeyG', () => { this.showDebug = !this.showDebug; this.hud.setDebug(this.showDebug); });
     key('KeyP', () => { this.showDebug = !this.showDebug; this.hud.setDebug(this.showDebug); });
@@ -212,18 +218,14 @@ export class Game {
     const dt = raw / 1000;
     this.structure.update(dt);
     this.track.update(dt);
-    this.sand.update(dt);
+    this.marbles.update();
     this.receivers.update(dt);
     this.juice.update(dt);
     this.world.update(raw);
     this.hud.update(this.model, this.showDebug ? this.debugText() : null);
 
-    const load = this.model.sand.bufferPercent / 100;
+    const load = this.model.sorting.load / this.model.sorting.capacity;
     audio.setHum(load);
-    // A running hiss while material is actually crossing throats, scaled by how
-    // much. Continuous material wants a continuous sound, never a click a grain.
-    audio.setPour(Math.min(1, this.pourLoudness / (raw * 0.06 + 1e-6)));
-    this.pourLoudness = 0;
     if (load >= 0.8 && now - this.warnedAt > 2600) {
       this.warnedAt = now;
       audio.warn(); haptics.warn();
@@ -234,29 +236,20 @@ export class Game {
   }
 
   private debugText() {
-    const m = this.model, src = m.source, sand = m.sand;
+    const m = this.model, src = m.source;
     const screws = src.screws.filter((s) => !s.removed).map((s) => {
-      const trapped = (src.platesByScrew.get(s.id) ?? []).map((p) => p.id).join('+');
-      return `${s.id.padEnd(11)} holds ${trapped}`;
+      const b = src.activeBlockers(s).map((p) => p.id).join(',');
+      return `${s.id.padEnd(11)} ${s.plateId.padEnd(10)} ${src.isAccessible(s) ? 'OPEN' : 'blocked by ' + b}`;
     });
-    const plates = src.plates.filter((p) => p.present).map((p) => {
-      const t = src.trappedBy(p);
-      return `${p.id.padEnd(10)} z${String(p.z).padStart(5)} ${p.supports}sup ${p.state.padEnd(9)}`
-        + `${p.loose ? ' LOOSE' : ''}${t ? ' under ' + t.id : ''}`;
-    });
-    const res = sand.reservoirs.filter((r) => r.state !== 'empty').map((r) =>
-      `${r.id.padEnd(9)} ${r.color.padEnd(6)} ${r.remaining.toFixed(0).padStart(4)}u`
-      + ` pile ${r.pile.toFixed(0).padStart(3)}u  ${r.state}`);
-    const byCol = sand.bufferByColor();
+    const plates = src.plates.filter((p) => p.present).map((p) =>
+      `${p.id.padEnd(10)} z${String(p.z).padStart(5)} ${p.supports}sup ${p.state.padEnd(9)} ${((p.angle * 180) / Math.PI).toFixed(0)}deg`);
+    const pockets = src.pockets.filter((p) => !p.drained).map((p) =>
+      `${p.id.padEnd(9)} ${p.color.padEnd(6)} ${String(p.pending).padStart(2)}/${p.total} ${p.def.kind.padEnd(12)} @${p.def.releaseAt}${p.open ? ' POURING' : ''}`);
     return [
-      `fps ${this.fps.toFixed(0)}  grains ${this.sand.liveGrains}/${TUNING.VISUAL_PARTICLE_COUNT}`,
-      `buffer ${sand.bufferVolume.toFixed(0)}/${TUNING.BUFFER_CAPACITY} = ${Math.round(sand.bufferPercent)}%`,
-      `  ${(Object.keys(byCol) as (keyof typeof byCol)[]).map((c) => `${c[0]}:${byCol[c].toFixed(0)}`).join('  ')}`,
-      `funnel ${sand.funnel.reduce((n, f) => n + f.volume, 0).toFixed(0)}u   in flight ${sand.inFlight.toFixed(0)}u`,
-      `rates  src ${TUNING.SOURCE_FLOW_RATE} > throat ${TUNING.MAIN_THROAT_FLOW_RATE} > neck ${TUNING.BUFFER_INPUT_RATE}`,
-      `exposed ${sand.activeReceivers().map((r) => `${r.color}:${Math.round(r.fill)}%`).join('  ')}`,
-      `receivers ${sand.receiversLeft}/${sand.receiversTotal}`,
-      '', 'SCREWS', ...screws, '', 'PLANKS', ...plates, '', 'RESERVOIRS', ...res,
+      `fps ${this.fps.toFixed(0)}  bodies ${m.driver.activeCount}  marbles ${m.marbles.length}`,
+      `belt ${m.sorting.load}/${m.sorting.capacity}  air ${m.airborne}  boxes ${m.sorting.boxesLeft}/${m.sorting.boxesTotal}`,
+      `exposed ${m.sorting.activeReceivers().map((r) => `${r.color}:${r.filled}/3`).join('  ')}`,
+      '', 'SCREWS', ...screws, '', 'PLATES', ...plates, '', 'POCKETS', ...pockets,
     ].join('\n');
   }
 
@@ -289,6 +282,7 @@ export class Game {
   restart(): Promise<void> {
     cancelAnimationFrame(this.raf);
     this.world.root.clear();
+    this.model.driver.reset();
     return this.build().then(() => {
       this.last = performance.now();
       const loop = () => { this.raf = requestAnimationFrame(loop); this.tick(); };

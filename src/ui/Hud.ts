@@ -25,12 +25,12 @@ export class Hud {
     this.root = document.getElementById('hud')!;
     this.root.innerHTML = `
       <div class="hud-bar">
-        <div class="hud-pill"><b id="hud-marbles">0</b><span>SAND LEFT</span></div>
+        <div class="hud-pill"><b id="hud-marbles">90</b><span>MARBLES</span></div>
         <div class="hud-progress"><div id="hud-bar"></div></div>
-        <div class="hud-pill"><b id="hud-boxes">0</b><span>JARS</span></div>
+        <div class="hud-pill"><b id="hud-boxes">30</b><span>BOXES</span></div>
         <button id="hud-mute" aria-label="mute">${audio.muted ? '🔇' : '🔊'}</button>
       </div>
-      <div id="hud-belt" class="hud-belt"><span id="hud-belt-txt">0%</span><i id="hud-belt-fill"></i></div>
+      <div id="hud-belt" class="hud-belt"><span id="hud-belt-txt">0/24</span><i id="hud-belt-fill"></i></div>
       <div id="hud-level" class="hud-level"></div>
       <div id="hud-hint" class="hud-hint"></div>
       <pre id="hud-debug" class="hud-debug hidden"></pre>
@@ -72,27 +72,18 @@ export class Hud {
   }
   dismissHint() { this.hintTimer = Math.min(this.hintTimer, performance.now() + 260); }
 
-  /** Percentages move a step at a time toward the truth, so a number never
-   *  jumps 32 -> 67 while the player is watching the sand that caused it. */
-  private shownBuffer = 0;
-
   update(m: GameModel, debugText: string | null) {
-    // How much material is still anywhere but a jar, as a percentage of the
-    // level. One number, no counting.
-    const total = m.level.pockets.reduce((n, k) => n + k.volume, 0);
-    const outstanding = m.sand.sourceLeft + m.sand.inFlight + m.sand.bufferVolume;
-    this.marbles.textContent = `${Math.ceil((outstanding / total) * 100)}%`;
-    this.boxes.textContent = String(m.sand.receiversLeft);
-    const done = 1 - m.sand.receiversLeft / m.sand.receiversTotal;
+    const left = m.source.marblesLeft + m.airborne + m.sorting.load;
+    this.marbles.textContent = String(left);
+    this.boxes.textContent = String(m.sorting.boxesLeft);
+    const done = 1 - m.sorting.boxesLeft / m.sorting.boxesTotal;
     this.bar.style.width = `${(done * 100).toFixed(1)}%`;
 
-    const target = m.sand.bufferPercent;
-    this.shownBuffer += (target - this.shownBuffer) * 0.25;
-    if (Math.abs(target - this.shownBuffer) < 0.4) this.shownBuffer = target;
-    const p = this.shownBuffer / 100;
+    const load = m.sorting.load, cap = m.sorting.capacity;
+    const p = load / cap;
     (document.getElementById('hud-belt-txt') as HTMLElement).textContent =
-      `${Math.round(this.shownBuffer)}%`;
-    this.beltFill.style.width = `${Math.min(100, this.shownBuffer).toFixed(1)}%`;
+      `${load}/${cap}${m.airborne ? `  +${m.airborne}` : ''}`;
+    this.beltFill.style.width = `${Math.min(100, p * 100).toFixed(1)}%`;
     const cls = p >= 0.88 ? 'danger' : p >= 0.6 ? 'warn' : '';
     if (cls !== this.lastBeltClass) {
       this.belt.classList.remove('warn', 'danger');
@@ -108,15 +99,15 @@ export class Hud {
   }
 
   showOverlay(won: boolean, m: GameModel, lv?: { level: number; total: number; name: string; more: boolean }) {
-    const title = won ? (lv?.more ? `LEVEL ${lv.level} CLEAR` : 'ALL LEVELS CLEAR') : 'CHANNEL FULL';
+    const title = won ? (lv?.more ? `LEVEL ${lv.level} CLEAR` : 'ALL LEVELS CLEAR') : 'CONVEYOR FULL';
     const cta = won ? (lv?.more ? `NEXT: ${LEVELS[lv.level].name}` : 'PLAY AGAIN') : 'RETRY';
     this.overlay.classList.remove('hidden');
     this.overlay.innerHTML = `
       <div class="panel ${won ? 'win' : 'lose'}">
         <h1>${title}</h1>
         <p>${won
-          ? `${m.taps} taps · ${m.sand.receiversTotal} jars filled to 100%`
-          : 'sand kept arriving with nowhere left to put it'}</p>
+          ? `${m.taps} taps · ${m.sorting.boxesTotal} boxes packed`
+          : 'a batch poured with nowhere left to put it'}</p>
         <button id="hud-restart">${cta}</button>
       </div>`;
     const btn = document.getElementById('hud-restart')!;

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { COLORS, ENV, LAYOUT, TUNING } from '../config/GameConfig';
 import type { GameModel } from '../game/GameModel';
-import type { Receiver } from '../game/SandModel';
+import { socketPos, type Receiver } from '../game/SortingModel';
 import { box, frameMaterial, GEO, metalMaterial, plasticMaterial } from './Materials';
 
 interface ColumnView {
@@ -9,13 +9,8 @@ interface ColumnView {
   /** The live box. Retextured in place as the column advances. */
   box: THREE.Group;
   body: THREE.Mesh;
-  /** The sand actually sitting in the jar. Scales with fill. */
-  fill: THREE.Mesh;
-  /** A slightly uneven crown on top of it, so the surface reads as loose. */
-  crown: THREE.Mesh;
-  /** The small heap in the mouth while a stream is arriving. */
-  inlet: THREE.Mesh;
-  glass: THREE.Mesh;
+  sockets: THREE.Mesh[];
+  tray: THREE.Mesh;
   queued: THREE.Mesh[];
   label: THREE.Sprite;
   active: Receiver | null;
@@ -36,7 +31,7 @@ export class ReceiverView {
   private cols: ColumnView[] = [];
 
   constructor(private model: GameModel) {
-    model.sand.columns.forEach((col, ci) => {
+    model.sorting.columns.forEach((col, ci) => {
       const root = new THREE.Group();
       root.position.set(LAYOUT.recvColX[ci], 0, 0);
 
@@ -53,50 +48,27 @@ export class ReceiverView {
       body.castShadow = true; body.receiveShadow = true;
       boxGroup.add(body);
 
-      // A JAR, NOT A SOCKET STRIP.
-      //
-      // The container is open-fronted and the sand inside is a real column whose
-      // height is the fill fraction, so the number and the picture cannot
-      // disagree. Three round holes could only ever say 0, 1, 2 or 3.
-      const inner = LAYOUT.recvBoxW - 2.2;
-      const innerH = LAYOUT.recvBoxH - 2.0;
-      const well = box(inner, innerH, 0.5, new THREE.MeshStandardMaterial({
-        color: COLORS[active.color].deep, roughness: 0.95,
-      }));
-      well.position.set(0, 0, 1.55);
-      boxGroup.add(well);
-
-      const fill = box(inner - 0.5, 1, 1.1, new THREE.MeshStandardMaterial({
-        color: COLORS[active.color].light, roughness: 0.95, flatShading: true,
-      }));
-      boxGroup.add(fill);
-
-      // A shallow cone riding the surface: loose material never sits flat.
-      const crown = new THREE.Mesh(
-        new THREE.ConeGeometry(inner * 0.42, 1.0, 12),
-        new THREE.MeshStandardMaterial({ color: COLORS[active.color].light, roughness: 0.95, flatShading: true }),
-      );
-      boxGroup.add(crown);
-
-      // The mouth. Deliberately narrower than the jar, so a stream heaps here
-      // for a moment before it drops in.
-      const inletMesh = new THREE.Mesh(
-        new THREE.ConeGeometry(TUNING.RECEIVER_INLET_WIDTH, 1, 12),
-        new THREE.MeshStandardMaterial({ color: COLORS[active.color].light, roughness: 0.95, flatShading: true }),
-      );
-      inletMesh.visible = false;
-      boxGroup.add(inletMesh);
-
-      // Plain transparency, NOT `transmission`. A transmissive material makes
-      // Three re-render the entire scene into a transmission target every frame;
-      // one pane of it here took the frame from 35ms to 99ms.
-      const glass = box(inner + 0.6, innerH + 0.6, 0.35, new THREE.MeshPhysicalMaterial({
-        color: 0xffffff, roughness: 0.14, metalness: 0,
-        transparent: true, opacity: 0.16, depthWrite: false,
-      }));
-      glass.position.set(0, 0, 2.35);
-      boxGroup.add(glass);
-
+      // Recessed tray + three obvious sockets. The tray takes a darker shade of
+      // the box colour rather than near-black: a black bar behind three black
+      // holes reads as one slot, and the player has to count sockets at a glance.
+      const trayMat = new THREE.MeshStandardMaterial({ color: COLORS[active.color].deep, roughness: 0.7 });
+      const tray = box(LAYOUT.recvBoxW - 1.6, 3.6, 0.6, trayMat);
+      tray.position.set(0, LAYOUT.recvSocketDY, 1.7);
+      boxGroup.add(tray);
+      const sockets: THREE.Mesh[] = [];
+      for (let i = 0; i < TUNING.RECEIVER_CAPACITY; i++) {
+        const rim = new THREE.Mesh(GEO.socket, new THREE.MeshStandardMaterial({ color: 0xf3ead8, roughness: 0.5 }));
+        rim.scale.set(1.5, 0.35, 1.5);
+        rim.rotation.x = Math.PI / 2;
+        rim.position.set((i - 1) * LAYOUT.recvSocketDX, LAYOUT.recvSocketDY, 1.86);
+        boxGroup.add(rim);
+        const s = new THREE.Mesh(GEO.socket, new THREE.MeshStandardMaterial({ color: 0x171510, roughness: 0.95 }));
+        s.scale.set(1.24, 0.5, 1.24);
+        s.rotation.x = Math.PI / 2;
+        s.position.set((i - 1) * LAYOUT.recvSocketDX, LAYOUT.recvSocketDY, 1.92);
+        boxGroup.add(s);
+        sockets.push(s);
+      }
       root.add(boxGroup);
 
       // Queue slivers beneath the live box.
@@ -114,19 +86,22 @@ export class ReceiverView {
       root.add(label);
 
       this.group.add(root);
-      this.cols.push({ root, box: boxGroup, body, fill, crown, inlet: inletMesh, glass, queued, label, active, swapT: 1, exitT: 0 });
+      this.cols.push({ root, box: boxGroup, body, sockets, tray, queued, label, active, swapT: 1, exitT: 0 });
     });
+  }
+
+  /** A marble snapped home. Punch the box so the hit registers. */
+  onSocketFilled(r: Receiver) {
+    const cv = this.cols[r.column];
+    cv.box.scale.set(1.07, 0.93, 1);
   }
 
   onComplete(r: Receiver) {
     this.cols[r.column].exitT = 0.0001;
   }
 
-  private t = 0;
-
   update(dt: number) {
-    this.t += dt;
-    this.model.sand.columns.forEach((col, ci) => {
+    this.model.sorting.columns.forEach((col, ci) => {
       const cv = this.cols[ci];
       const live = col.find((r) => r.state === 'active' || r.state === 'completing') ?? null;
 
@@ -160,40 +135,21 @@ export class ReceiverView {
 
       if (live && live !== cv.active) {
         cv.active = live;
-        const c = COLORS[live.color];
-        (cv.body.material as THREE.MeshPhysicalMaterial).color.setHex(c.hex);
-        for (const m of [cv.fill, cv.crown, cv.inlet]) {
-          (m.material as THREE.MeshStandardMaterial).color.setHex(c.light);
-        }
+        (cv.body.material as THREE.MeshPhysicalMaterial).color.setHex(COLORS[live.color].hex);
+        (cv.tray.material as THREE.MeshStandardMaterial).color.setHex(COLORS[live.color].deep);
       }
       cv.box.visible = !!live;
 
-      // THE FILL IS THE PERCENTAGE. One number drives the column height, the
-      // crown that rides on it, and the label — they cannot drift apart.
-      const pct = live ? Math.min(1, live.fill / TUNING.RECEIVER_CAPACITY) : 0;
-      const innerH = LAYOUT.recvBoxH - 2.0;
-      const h = Math.max(0.001, innerH * pct);
-      cv.fill.visible = pct > 0.002;
-      cv.fill.scale.y = h;
-      cv.fill.position.set(0, -innerH / 2 + h / 2, 1.7);
-      cv.crown.visible = pct > 0.02 && pct < 0.995;
-      cv.crown.scale.set(1, 0.5 + Math.sin(this.t * 2.2 + ci) * 0.06, 1);
-      cv.crown.position.set(0, -innerH / 2 + h + 0.22, 1.7);
+      // Sockets light up as they fill.
+      const filled = live ? Math.min(live.filled, TUNING.RECEIVER_CAPACITY) : 0;
+      cv.sockets.forEach((s, i) => {
+        const m = s.material as THREE.MeshStandardMaterial;
+        const on = i < filled;
+        m.color.setHex(on && live ? COLORS[live.color].light : 0x1b1912);
+        m.emissive.setHex(on && live ? COLORS[live.color].deep : 0x000000);
+      });
 
-      // A heap in the mouth while sand is actually arriving.
-      const heap = live ? Math.min(1, live.inlet / 14) : 0;
-      cv.inlet.visible = heap > 0.03;
-      cv.inlet.scale.set(0.5 + heap * 0.7, 0.6 + heap * 1.5, 0.5 + heap * 0.7);
-      cv.inlet.position.set(0, innerH / 2 + 0.5, 1.9);
-
-      // The completion pulse.
-      if (live && live.pulse > 0) {
-        const k = 1 + live.pulse * 0.09;
-        cv.box.scale.set(k, 2 - k, 1);
-      }
-
-      // Queue slivers track the colours still to come — seeing GREEN two boxes
-      // away is what turns "should I open that reservoir now?" into a judgement.
+      // Queue slivers track the colours still to come.
       const upcoming = col.filter((r) => r.state === 'queued');
       cv.queued.forEach((q, i) => {
         const r = upcoming[i];
@@ -201,7 +157,7 @@ export class ReceiverView {
         if (r) (q.material as THREE.MeshPhysicalMaterial).color.setHex(COLORS[r.color].hex);
       });
 
-      drawLabel(cv.label, live ? `${Math.round(live.fill)}%` : '', upcoming.length);
+      drawLabel(cv.label, live ? `${filled}/${TUNING.RECEIVER_CAPACITY}` : '', upcoming.length);
     });
   }
 }

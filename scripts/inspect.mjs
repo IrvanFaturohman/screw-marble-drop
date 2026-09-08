@@ -1,7 +1,7 @@
 /**
  * Sculpture inspector. Prints the DERIVED truth about the authored level —
  * baked screw positions, what covers what, the reveal waves, which pulls spill
- * sand and which are purely structural — so iterating on a layered board
+ * marbles and which are purely structural — so iterating on a layered sculpture
  * is a read rather than a guess.
  *
  * Usage: node scripts/inspect.mjs [--map]
@@ -14,7 +14,7 @@ import { join } from 'node:path';
 
 const out = join(mkdtempSync(join(tmpdir(), 'smd-')), 'h.mjs');
 await build({ entryPoints: ['src/game/headless.ts'], bundle: true, format: 'esm', platform: 'node', target: 'node18', outfile: out, logLevel: 'error' });
-const { SourceModel, SandModel, LEVELS, TUNING, LAYOUT, HALF_W, colorSupply, colorDemand, shapeBox, shapeBoxRot } =
+const { SourceModel, SortingModel, LEVELS, TUNING, LAYOUT, HALF_W, colorSupply, colorDemand, shapeBox, shapeBoxRot } =
   await import(pathToFileURL(out).href);
 
 /** Which level. `--level 2` / `--level=2`; defaults to the first. */
@@ -28,7 +28,7 @@ const LEVEL = LEVELS[LEVEL_NO - 1];
 
 const C = { g: '\x1b[32m', r: '\x1b[31m', y: '\x1b[33m', d: '\x1b[90m', x: '\x1b[0m', b: '\x1b[1m' };
 const src = new SourceModel(LEVEL);
-const sand = new SandModel(LEVEL.receiverStacks);
+const sorting = new SortingModel(LEVEL.receiverStacks);
 
 console.log(`\n${C.b}PLATES${C.x}  (front to back)`);
 for (const p of [...src.plates].sort((a, b) => b.z - a.z)) {
@@ -67,10 +67,10 @@ console.log(`\n${C.b}REVEAL WAVES${C.x}  (what one pull opens up)`);
     }
     console.log(`  wave ${wave}: ${line.join(' ')}`);
   }
-  console.log(`  ${C.d}(+n) = units of sand released, (-) = purely structural${C.x}`);
+  console.log(`  ${C.d}(+n) = marbles spilled, (-) = purely structural${C.x}`);
 }
 
-console.log(`\n${C.b}RESERVOIRS${C.x}`);
+console.log(`\n${C.b}POCKETS${C.x}`);
 for (const p of LEVEL.pockets) {
   console.log(`  ${p.id.padEnd(10)} ${p.color.padEnd(6)} x${String(p.count).padStart(2)} ${p.kind.padEnd(13)} on ${p.plate.padEnd(10)} @${p.releaseAt}`);
 }
@@ -83,7 +83,7 @@ console.log(`\n${C.b}COLOUR BALANCE${C.x}`);
     console.log(`  ${k.padEnd(7)} supply ${String(sup[k] ?? 0).padStart(3)}  demand ${String(dem[k] ?? 0).padStart(3)}  ${ok ? C.g + 'ok' : C.r + 'MISMATCH'}${C.x}`);
   }
   const total = Object.values(sup).reduce((a, b) => a + b, 0);
-  console.log(`  ${total} units of sand, ${sand.receiversTotal} boxes x ${TUNING.RECEIVER_CAPACITY}, capacity ${TUNING.BUFFER_CAPACITY}`);
+  console.log(`  ${total} marbles, ${sorting.boxesTotal} boxes x ${TUNING.RECEIVER_CAPACITY}, capacity ${TUNING.CONVEYOR_CAPACITY}`);
 }
 
 console.log(`\n${C.b}RECEIVER STACKS${C.x}  (top = live)`);
@@ -108,7 +108,7 @@ console.log(`\n${C.b}BANDS${C.x}`);
   console.log(`  board      x ${x0.toFixed(1)} .. ${x1.toFixed(1)}   (frame half-width ${HALF_W})`);
   console.log(`  board      y ${lo.toFixed(1)} .. ${hi.toFixed(1)}   (HUD at ${LAYOUT.hudBottom})`);
   console.log(`  fall       ${LAYOUT.funnelBottom} .. ${lo.toFixed(1)}   = ${(lo - LAYOUT.funnelBottom).toFixed(1)} units`);
-  console.log(`  channel    ${(LAYOUT.loopCY - LAYOUT.loopRY).toFixed(1)} .. ${(LAYOUT.loopCY + LAYOUT.loopRY).toFixed(1)}   loop ${sand.path.length.toFixed(1)} units, holds ${TUNING.BUFFER_CAPACITY} of sand`);
+  console.log(`  conveyor   ${(LAYOUT.loopCY - LAYOUT.loopRY).toFixed(1)} .. ${(LAYOUT.loopCY + LAYOUT.loopRY).toFixed(1)}   loop ${sorting.path.length.toFixed(1)} units, ${TUNING.CONVEYOR_CAPACITY} marbles = ${(TUNING.CONVEYOR_CAPACITY * TUNING.CONVEYOR_MIN_GAP / sorting.path.length * 100).toFixed(0)}% full`);
 }
 
 if (process.argv.includes('--map')) {

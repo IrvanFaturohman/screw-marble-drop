@@ -118,7 +118,7 @@ export class TrackView {
     this.group.add(this.ring);
 
     // Moving tread.
-    const path = this.model.sand.path;
+    const path = this.model.sorting.path;
     this.treadN = Math.floor(path.length / 2.2);
     this.tread = new THREE.InstancedMesh(
       new THREE.BoxGeometry(0.28, LAYOUT.beltChannelW * 0.82, 0.2),
@@ -129,24 +129,24 @@ export class TrackView {
     this.group.add(this.tread);
 
     // Collection gate at the bottom of the loop, aimed at the receivers.
-    this.gateGlow = box(TUNING.RECEIVER_INLET_WIDTH * 2.4 * 2, LAYOUT.beltChannelW, 0.2,
+    this.gateGlow = box(TUNING.EXIT_GATE_HALF * 2, LAYOUT.beltChannelW, 0.2,
       new THREE.MeshBasicMaterial({ color: 0xfff3d4, transparent: true, opacity: 0.2 }));
     const gp = path.point(path.length / 2);
     this.gateGlow.position.set(gp.x, gp.y, 1.2);
     this.group.add(this.gateGlow);
 
     // Chute mouth under the gate.
-    const chute = box(TUNING.RECEIVER_INLET_WIDTH * 2.4 * 2.1, 0.5, 3.0, metalMaterial(ENV.metalDeep, 0.4));
+    const chute = box(TUNING.EXIT_GATE_HALF * 2.1, 0.5, 3.0, metalMaterial(ENV.metalDeep, 0.4));
     chute.position.set(gp.x, gp.y - LAYOUT.beltChannelW / 2 - 1.1, 0.6);
     this.group.add(chute);
   }
 
   update(dt: number) {
     this.t += dt;
-    const path = this.model.sand.path;
+    const path = this.model.sorting.path;
     const dummy = new THREE.Object3D();
 
-    this.scroll = (this.scroll + TUNING.BUFFER_FLOW_SPEED * dt) % 2.2;
+    this.scroll = (this.scroll + TUNING.CONVEYOR_SPEED * dt) % 2.2;
     for (let i = 0; i < this.treadN; i++) {
       const s = this.scroll + i * 2.2;
       const p = path.point(s);
@@ -157,13 +157,13 @@ export class TrackView {
     }
     this.tread.instanceMatrix.needsUpdate = true;
 
-    const p = this.model.sand.bufferPercent / 100;
+    const p = Math.min(1, this.model.sorting.load / this.model.sorting.capacity);
     const danger = p >= 0.88, warn = p >= 0.6;
     const pulse = danger ? 0.55 + 0.45 * Math.sin(this.t * 9) : 1;
     this.ringMat.color.setHex(danger ? 0xf8443c : warn ? 0xffc02e : 0x8a97ab);
     this.ringMat.opacity = (danger ? 0.95 : warn ? 0.6 : 0.24) * pulse;
 
-    const anyMatch = this.model.sand.segments.some((b) => !!this.model.sand.destinationFor(b.color));
+    const anyMatch = this.model.sorting.belt.some((b) => !!this.model.sorting.destinationFor(b.color));
     (this.gateGlow.material as THREE.MeshBasicMaterial).opacity =
       0.12 + (anyMatch ? 0.28 * (0.5 + 0.5 * Math.sin(this.t * 8)) : 0.04);
   }

@@ -9,45 +9,39 @@ type Section = { title: string; rows: Row[] };
  * reads TUNING every frame so every slider is live.
  */
 const SECTIONS: Section[] = [
-  { title: 'SCREWS + PLANKS', rows: [
+  { title: 'SCREWS + PLATES', rows: [
+    { key: 'DEFAULT_BATCH_SIZE', label: 'batch size', min: 3, max: 16, step: 1 },
+    { key: 'BATCH_RELEASE_INTERVAL', label: 'release gap ms', min: 4, max: 160, step: 2 },
+    { key: 'BATCH_RELEASE_SPREAD', label: 'release spread', min: 0, max: 14, step: 0.2 },
     { key: 'UNSCREW_DURATION', label: 'unscrew ms', min: 120, max: 1200, step: 20 },
     { key: 'UNSCREW_TURNS', label: 'unscrew turns', min: 0.5, max: 8, step: 0.1 },
-    { key: 'PLATE_PARTIAL_MS', label: 'plank swing ms', min: 120, max: 1400, step: 20 },
-    { key: 'PLATE_RELEASE_MS', label: 'plank leave ms', min: 150, max: 1600, step: 20 },
-    { key: 'PLATE_FALL_GRAVITY', label: 'plank gravity', min: -160, max: -8, step: 2 },
+    { key: 'PLATE_PARTIAL_MS', label: 'plate swing ms', min: 120, max: 1400, step: 20 },
+    { key: 'PLATE_RELEASE_MS', label: 'plate leave ms', min: 150, max: 1600, step: 20 },
+    { key: 'PLATE_FALL_GRAVITY', label: 'plate gravity', min: -160, max: -8, step: 2 },
   ] },
-  // The three rates that make a pile. They MUST stay in descending order or the
-  // sand drains like water and nothing ever stacks — that is the whole revision.
-  { title: 'SAND FLOW', rows: [
-    { key: 'SOURCE_FLOW_RATE', label: 'source rate', min: 6, max: 120, step: 1 },
-    { key: 'MAIN_THROAT_FLOW_RATE', label: 'throat rate', min: 3, max: 80, step: 1 },
-    { key: 'BUFFER_INPUT_RATE', label: 'neck rate', min: 3, max: 90, step: 1 },
-    { key: 'RECEIVER_DRAIN_RATE', label: 'jar drain', min: 4, max: 120, step: 1 },
-    { key: 'GATE_OPEN_MS', label: 'gate open ms', min: 0, max: 1200, step: 20 },
-    { key: 'PILE_SETTLE_MS', label: 'settle ms', min: 0, max: 2000, step: 20 },
+  { title: 'MARBLE PHYSICS', rows: [
+    { key: 'MARBLE_GRAVITY', label: 'gravity', min: -180, max: -10, step: 2 },
+    { key: 'MARBLE_RESTITUTION', label: 'restitution', min: 0, max: 0.95, step: 0.02 },
+    { key: 'MARBLE_FRICTION', label: 'friction', min: 0, max: 1, step: 0.02 },
+    { key: 'MARBLE_LINEAR_DAMPING', label: 'lin damping', min: 0, max: 1.5, step: 0.02 },
+    { key: 'MARBLE_MAX_SPEED', label: 'max speed', min: 20, max: 200, step: 2 },
+    { key: 'FUNNEL_ASSIST_STRENGTH', label: 'funnel assist', min: 0, max: 160, step: 2 },
+    { key: 'SLAB_ASSIST_STRENGTH', label: 'slab assist', min: 0, max: 120, step: 2 },
   ] },
-  { title: 'PILES + THROATS', rows: [
-    { key: 'PILE_FULL_VOLUME', label: 'pile full at', min: 10, max: 240, step: 5 },
-    { key: 'PILE_MAX_HEIGHT', label: 'pile height', min: 1, max: 12, step: 0.2 },
-    { key: 'PILE_MAX_WIDTH', label: 'pile width', min: 1, max: 16, step: 0.2 },
-    { key: 'OUTLET_WIDTH', label: 'outlet frac', min: 0.05, max: 0.6, step: 0.01 },
-    { key: 'MAIN_THROAT_WIDTH', label: 'neck half-w', min: 0.6, max: 8, step: 0.1 },
-    { key: 'RECEIVER_INLET_WIDTH', label: 'jar mouth', min: 0.6, max: 6, step: 0.1 },
+  { title: 'CONVEYOR', rows: [
+    { key: 'CONVEYOR_CAPACITY', label: 'capacity', min: 8, max: 40, step: 1 },
+    { key: 'CONVEYOR_SPEED', label: 'speed', min: 3, max: 45, step: 0.5 },
+    { key: 'CONVEYOR_RUSH_MULT', label: 'rush mult', min: 1, max: 5, step: 0.1 },
+    { key: 'CONVEYOR_MIN_GAP', label: 'min gap', min: 1.6, max: 6, step: 0.1 },
+    { key: 'CONVEYOR_INTAKE_MS', label: 'intake ms', min: 60, max: 700, step: 10 },
   ] },
-  { title: 'CHANNEL + JARS', rows: [
-    { key: 'BUFFER_CAPACITY', label: 'channel cap', min: 80, max: 900, step: 10 },
-    { key: 'BUFFER_FLOW_SPEED', label: 'channel speed', min: 2, max: 50, step: 0.5 },
-    { key: 'BUFFER_RUSH_MULT', label: 'rush mult', min: 1, max: 5, step: 0.1 },
-    { key: 'RECEIVER_CAPACITY', label: 'jar = 100%', min: 20, max: 300, step: 10 },
+  { title: 'SORTING', rows: [
+    { key: 'AUTO_SORT_INTERVAL', label: 'sort interval', min: 25, max: 500, step: 5 },
+    { key: 'EXIT_GATE_HALF', label: 'gate half', min: 2, max: 20, step: 0.5 },
+    { key: 'SORT_FLIGHT_DURATION', label: 'sort flight ms', min: 80, max: 800, step: 10 },
+    { key: 'RECEIVER_CAPACITY', label: 'sockets', min: 1, max: 6, step: 1 },
     { key: 'RECEIVER_COMPLETE_DELAY', label: 'complete ms', min: 0, max: 700, step: 10 },
     { key: 'RECEIVER_SWAP_DURATION', label: 'swap ms', min: 60, max: 900, step: 10 },
-  ] },
-  { title: 'VISUAL SAND', rows: [
-    { key: 'UNITS_PER_GRAIN', label: 'units/grain', min: 0.3, max: 8, step: 0.1 },
-    { key: 'VISUAL_PARTICLE_SIZE', label: 'grain size', min: 0.08, max: 1.2, step: 0.02 },
-    { key: 'PARTICLE_GRAVITY', label: 'grain gravity', min: -200, max: -10, step: 2 },
-    { key: 'PARTICLE_SPREAD', label: 'grain spread', min: 0, max: 8, step: 0.1 },
-    { key: 'PARTICLE_DAMPING', label: 'grain damping', min: 0.5, max: 1, step: 0.01 },
   ] },
   { title: 'FEEL', rows: [
     { key: 'GAME_SPEED', label: 'game speed', min: 0.25, max: 4, step: 0.05 },
