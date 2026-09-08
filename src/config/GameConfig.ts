@@ -189,68 +189,95 @@ export const TUNING = {
 
   // --- batch ---
   /** Marbles per chamber unless the level overrides it. */
-  DEFAULT_BATCH_SIZE: 9,
-  /** ms between marbles in one release. 9 marbles land inside ~200ms. */
-  BATCH_RELEASE_INTERVAL: 22,
-  /** Sideways scatter given to each marble as it leaves, world units/s. */
-  BATCH_RELEASE_SPREAD: 4.6,
+  // --------------------------------------------------- SCREWS AND PLANKS --
 
-  // --- screw + gate ---
+  /** ms for the head to back out. The anticipation beat before anything moves. */
   UNSCREW_DURATION: 420,
   UNSCREW_TURNS: 3.2,
-  /** How far the head backs out before it drops to the screw tray. */
+  /** How far the head comes forward before it fades out of the way. */
   UNSCREW_LIFT: 2.6,
-  /** A plate swinging to its partial pose after losing one of two supports. */
+  /** A plank swinging to its partial pose after losing one of two supports.
+   *  This is the beat that says "the structure moved but nothing spilled". */
   PLATE_PARTIAL_MS: 420,
-  /** A plate leaving the board once its last support is gone. */
+  /** A plank leaving once its last support is gone. A reservoir that releases
+   *  `@detached` opens at 30% of this, so the plank visibly moves BEFORE any
+   *  sand appears — a percentage must never twitch on the tap itself. */
   PLATE_RELEASE_MS: 620,
-  /** Downward acceleration for a plate that falls away. */
   PLATE_FALL_GRAVITY: -52,
+  /** Cap on a hanging plank's swing, so nothing parks over the funnel. */
+  PLATE_SWING_MAX: 62,
 
-  // --- marble physics ---
-  MARBLE_RADIUS: 1.05,
-  MARBLE_MASS: 1.0,
-  MARBLE_RESTITUTION: 0.38,
-  MARBLE_FRICTION: 0.22,
-  MARBLE_LINEAR_DAMPING: 0.12,
-  MARBLE_ANGULAR_DAMPING: 0.35,
-  MARBLE_GRAVITY: -62,
-  /** Speed clamp so nothing tunnels through a guide. */
-  MARBLE_MAX_SPEED: 78,
+  // ------------------------------------------------------------------- SAND --
+  //
+  // Sand is VOLUME, not objects. Every number below is in volume units per
+  // second, and one receiver holds RECEIVER_CAPACITY of them.
+  //
+  // THE ONE RELATIONSHIP THAT MATTERS:
+  //
+  //     SOURCE_FLOW_RATE  >  MAIN_THROAT_FLOW_RATE  >  BUFFER_INPUT_RATE
+  //
+  // A reservoir pushes material at the first rate; the outlet under it only
+  // passes the second. The difference has nowhere to go, so it PILES UP above
+  // the throat — that pile is the whole point of the revision, and it exists
+  // because of this inequality rather than because of an animation.
+  // Make them equal and the sand vanishes through the hole like water.
 
-  // --- funnel / containment ---
-  /** Sideways pull toward the funnel throat once a marble is below the source. */
-  FUNNEL_ASSIST_STRENGTH: 46,
-  /** Pull toward the z=0 slab, so marbles never drift out of the play plane. */
-  SLAB_ASSIST_STRENGTH: 34,
-  /** A marble airborne longer than this is flown straight to the belt. */
-  MARBLE_RESCUE_MS: 3200,
-  /** A falling marble that has barely moved for this long gets shoved. Flat
-   *  ledges are a physics reality; a marble parked on one is a broken game, and
-   *  waiting for the rescue teleport reads as the game freezing. */
-  ANTI_REST_MS: 260,
-  ANTI_REST_IMPULSE: 11,
+  /** Units/sec a reservoir pushes toward its own outlet once it opens. */
+  SOURCE_FLOW_RATE: 46,
+  /** Units/sec that outlet actually passes. Deliberately far lower. */
+  MAIN_THROAT_FLOW_RATE: 17,
+  /** Units/sec the shared funnel neck passes into the buffer. Lower again, so
+   *  a second pile forms above the neck when several sources run at once. */
+  BUFFER_INPUT_RATE: 38,
+  /** Units/sec a receiver pulls its colour out of the channel.
+   *
+   *  DELIBERATELY BELOW the neck rate. If one jar can out-drain the neck, a
+   *  mismatched colour never backs up and the channel has no pressure at all —
+   *  opening every reservoir at once peaked at 13%, which is not a decision. */
+  RECEIVER_DRAIN_RATE: 26,
 
-  // --- conveyor ---
-  CONVEYOR_CAPACITY: 24,
-  /** Arc units per second. */
-  CONVEYOR_SPEED: 13.5,
-  /** Speed multiplier for a marble whose colour has an open receiver. */
-  CONVEYOR_RUSH_MULT: 2.2,
-  /** Minimum arc gap between marble centres. */
-  CONVEYOR_MIN_GAP: 2.6,
-  /** ms for a captured marble to ease from its impact point onto the belt. */
-  CONVEYOR_INTAKE_MS: 200,
+  /** One receiver = 100 units, so its fill IS the percentage. */
+  RECEIVER_CAPACITY: 100,
+  /** Total the shared channel can hold before it overflows. */
+  BUFFER_CAPACITY: 320,
+  /** Arc units/sec the sand travels around the channel. */
+  BUFFER_FLOW_SPEED: 15,
+  /** How much faster a colour moves when its receiver is open. */
+  BUFFER_RUSH_MULT: 1.9,
 
-  // --- auto sorting ---
-  /** ms between two marbles leaving the belt. This is the tik-tik-tik rhythm. */
-  AUTO_SORT_INTERVAL: 95,
-  /** Arc half-width of the collection gate at the bottom of the loop. */
-  EXIT_GATE_HALF: 6.0,
-  SORT_FLIGHT_DURATION: 260,
+  /** Time from tap to the reservoir actually opening. */
+  GATE_OPEN_MS: 260,
+  /** A pile keeps draining this long after its source runs dry, so the mound
+   *  never snaps out of existence. */
+  PILE_SETTLE_MS: 620,
+  /** Volume at which a mound is drawn at full height. */
+  PILE_FULL_VOLUME: 90,
+  /** World height of a mound at PILE_FULL_VOLUME. */
+  PILE_MAX_HEIGHT: 4.2,
+  /** How wide a mound spreads at full height. */
+  PILE_MAX_WIDTH: 6.4,
 
-  // --- receivers ---
-  RECEIVER_CAPACITY: 3,
+  /** Outlet width as a fraction of the plank it drains — the visible throat. */
+  OUTLET_WIDTH: 0.22,
+  /** Half-width of the funnel neck above the buffer, in world units. */
+  MAIN_THROAT_WIDTH: 2.6,
+  /** Half-width of a receiver mouth. */
+  RECEIVER_INLET_WIDTH: 2.2,
+
+  // ----------------------------------------------------------- visual sand --
+  // Grains are a VIEW of the volume above, never the source of truth. Losing a
+  // grain must never lose a unit; the pool is recycled freely.
+  /** Ceiling on live grains. Sized for a mid-range phone. */
+  VISUAL_PARTICLE_COUNT: 600,
+  /** Volume units each grain stands for while in flight. */
+  UNITS_PER_GRAIN: 0.19,
+  VISUAL_PARTICLE_SIZE: 0.32,
+  PARTICLE_GRAVITY: -52,
+  PARTICLE_SPREAD: 2.1,
+  PARTICLE_DAMPING: 0.86,
+  /** Sideways jitter as grains slide down a mound face. */
+  PARTICLE_SLIDE: 3.4,
+
   RECEIVER_COMPLETE_DELAY: 170,
   RECEIVER_SWAP_DURATION: 260,
 

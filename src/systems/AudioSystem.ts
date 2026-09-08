@@ -23,6 +23,11 @@ export class AudioSystem {
   private humOsc2: OscillatorNode | null = null;
   private humGain: GainNode | null = null;
   private humFilter: BiquadFilterNode | null = null;
+  /** Continuous pour hiss. Sand is continuous material; a click per grain
+   *  would be mush, and a click per batch would be a lie. */
+  private pourGain: GainNode | null = null;
+  private pourFilter: BiquadFilterNode | null = null;
+  private pourSrc: AudioBufferSourceNode | null = null;
   private lastClack = 0;
   muted = false;
 
@@ -107,6 +112,20 @@ export class AudioSystem {
     this.humGain = c.createGain(); this.humGain.gain.value = 0;
     this.humOsc.connect(this.humFilter); this.humOsc2.connect(this.humFilter);
     this.humFilter.connect(this.humGain).connect(this.master);
+
+    // Looping white noise through a bandpass: the closest cheap thing to the
+    // sound of loose material moving. Level and brightness both follow flow.
+    const len = Math.floor(c.sampleRate * 2);
+    const buf = c.createBuffer(1, len, c.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+    this.pourSrc = c.createBufferSource();
+    this.pourSrc.buffer = buf; this.pourSrc.loop = true;
+    this.pourFilter = c.createBiquadFilter();
+    this.pourFilter.type = 'bandpass'; this.pourFilter.frequency.value = 2600; this.pourFilter.Q.value = 0.8;
+    this.pourGain = c.createGain(); this.pourGain.gain.value = 0;
+    this.pourSrc.connect(this.pourFilter).connect(this.pourGain).connect(this.master);
+    this.pourSrc.start();
     this.humOsc.start(); this.humOsc2.start();
   }
 
@@ -116,6 +135,15 @@ export class AudioSystem {
     const t = this.ctx!.currentTime;
     this.humGain.gain.setTargetAtTime(0.020 + load * 0.048, t, 0.12);
     this.humFilter.frequency.setTargetAtTime(150 + load * 220, t, 0.12);
+  }
+
+  /** How hard sand is moving, 0..1. Called every frame. */
+  setPour(intensity: number) {
+    if (!this.ready || !this.pourGain || !this.pourFilter) return;
+    const t = this.ctx!.currentTime;
+    const k = Math.min(1, Math.max(0, intensity));
+    this.pourGain.gain.setTargetAtTime(k * 0.085, t, 0.05);
+    this.pourFilter.frequency.setTargetAtTime(1500 + k * 2600, t, 0.08);
   }
 
   // ----------------------------------------------------------------- events --

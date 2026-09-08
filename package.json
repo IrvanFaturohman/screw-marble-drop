@@ -10,11 +10,10 @@
     "typecheck": "tsc --noEmit",
     "validate": "node scripts/validate.mjs",
     "inspect": "node scripts/inspect.mjs",
-    "tune": "node scripts/tune.mjs",
-    "joints": "node scripts/joints.mjs"
+    "joints": "node scripts/joints.mjs",
+    "validate:all": "node scripts/validate.mjs && node scripts/validate.mjs --level 2"
   },
   "dependencies": {
-    "@dimforge/rapier3d-compat": "^0.14.0",
     "@types/three": "^0.185.4",
     "three": "^0.185.1"
   },

@@ -47,13 +47,11 @@ export default defineConfig({
     watch: { ignored: ['**/shots/**'] },
   },
   plugins: [frameGrabber()],
-  // Rapier ships as WASM; it must not be pre-bundled or the init() shim breaks.
-  optimizeDeps: { exclude: ['@dimforge/rapier3d-compat'] },
   build: {
     target: 'es2022',
     chunkSizeWarningLimit: 2500,
     rollupOptions: {
-      output: { manualChunks: { three: ['three'], rapier: ['@dimforge/rapier3d-compat'] } },
+      output: { manualChunks: { three: ['three'] } },
     },
   },
 });

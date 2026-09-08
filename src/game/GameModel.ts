@@ -1,96 +1,79 @@
 /**
- * The whole game as data.
+ * The whole game, with no renderer in it.
  *
- * Wires the one causal chain the design is about:
+ *   TAP A SCREW
+ *      -> a plank loses a support, swings or leaves
+ *      -> a sand reservoir built into that plank opens
+ *      -> sand pours faster than its narrow outlet can pass, and PILES UP
+ *      -> the pile squeezes through, collects again above the funnel neck
+ *      -> it enters the shared channel as a run of one colour
+ *      -> a matching receiver peels it off and fills from 0% to 100%
+ *      -> that receiver closes, the next one rises, and a colour that had
+ *         nowhere to go starts draining on its own
  *
- *   tap screw -> screw backs out -> gate tips -> WHOLE BATCH pours
- *      -> marbles fall, collide, funnel -> shared conveyor
- *      -> exposed receivers auto-collect fast (tik tik tik SNAP)
- *      -> box closes -> next colour exposed -> belt re-checked
- *      -> marbles that were stuck suddenly drain
- *      -> the opened gate uncovers the screw below it
- *
- * Neither Three nor Rapier appears here. `GameScene` renders this; the
- * validator plays it headlessly with a scripted driver. Both run the identical
- * simulation.
+ * There is no physics engine. Sand is VOLUME moving between nodes at authored
+ * rates, so `npm run validate` plays this exact code in Node and its result is
+ * the phone's result — there is no simulation gap left to chase.
  */
 
-import { HALF_W, LAYOUT, TUNING, type MarbleColor } from '../config/GameConfig';
+import { LAYOUT, TUNING, type MarbleColor } from '../config/GameConfig';
 import type { LevelDef } from '../config/LevelConfig';
 import { SourceModel, type Plate, type Pocket, type Screw } from './SourceModel';
-import { SortingModel, type BeltMarble, type Receiver } from './SortingModel';
-import { ScriptedDriver, type MarbleDriver, type Vec3 } from './MarbleDriver';
-import { Rng } from '../util/Rng';
-import { clamp, smoothstep } from './Geometry';
+import { SandModel, type Receiver, type Reservoir } from './SandModel';
 
 export type Phase = 'play' | 'won' | 'lost';
-
-export type MarbleState = 'falling' | 'intake' | 'belt' | 'delivering' | 'socketed';
-
-export interface Marble {
-  id: number;
-  color: MarbleColor;
-  state: MarbleState;
-  x: number; y: number; z: number;
-  spin: number;
-  age: number;
-  /** intake easing */
-  t: number;
-  /** ms this marble has spent effectively stationary while falling. */
-  stillMs: number;
-  lastX: number; lastY: number;
-  fromX: number; fromY: number; fromZ: number;
-  /** Chamber it came from, for effects. */
-  origin: string;
-  /** Receiver it was delivered into, so it can leave with the box. */
-  receiverId: string;
-}
 
 export interface GameEvents {
   onTap?: (s: Screw) => void;
   onBlockedTap?: (s: Screw, blocker: Plate | null) => void;
-  onScrewOut?: (s: Screw, plate: Plate) => void;
+  onScrewOut?: (s: Screw, p: Plate) => void;
   onPlatePartial?: (p: Plate) => void;
   onPlateRelease?: (p: Plate) => void;
   onPlateGone?: (p: Plate) => void;
   onPocketOpen?: (pk: Pocket) => void;
-  onRelease?: (pk: Pocket, m: Marble) => void;
   onUnlocked?: (s: Screw) => void;
-  onMarbleLanded?: (m: Marble) => void;
-  onDispatch?: (m: BeltMarble, r: Receiver, socket: number) => void;
-  onSocketFilled?: (r: Receiver, socket: number) => void;
+  /** Sand crossing a reservoir's throat this tick. Drives the falling stream. */
+  onThroatFlow?: (r: Reservoir, volume: number) => void;
+  onNeckFlow?: (color: MarbleColor, volume: number) => void;
+  onReceiverFlow?: (r: Receiver, volume: number) => void;
   onReceiverComplete?: (r: Receiver) => void;
   onReceiverExposed?: (r: Receiver) => void;
   onWin?: () => void;
   onLose?: () => void;
 }
 
-/** Marbles are captured onto the belt just above the loop's top straight. */
-const CAPTURE_Y = LAYOUT.loopCY + LAYOUT.loopRY + 1.3;
-
 export class GameModel {
   readonly source: SourceModel;
-  readonly sorting: SortingModel;
-  readonly driver: MarbleDriver;
-  readonly rng: Rng;
-
-  /** Every marble outside a chamber, in id order. */
-  readonly marbles: Marble[] = [];
-  private byId = new Map<number, Marble>();
-  private nextId = 1;
-  private scratch: Vec3 = { x: 0, y: 0, z: 0 };
+  readonly sand: SandModel;
 
   events: GameEvents = {};
   phase: Phase = 'play';
   elapsed = 0;
   taps = 0;
-  private completing: { r: Receiver; t: number }[] = [];
+  /** Held after an overflow so the player watches it back up before losing. */
+  private overflowHold = 0;
 
-  constructor(readonly level: LevelDef, driver?: MarbleDriver, seed?: number) {
-    this.rng = new Rng(seed);
-    this.driver = driver ?? new ScriptedDriver();
+  constructor(readonly level: LevelDef) {
     this.source = new SourceModel(level);
-    this.sorting = new SortingModel(level.receiverStacks);
+    this.sand = new SandModel(level.receiverStacks);
+
+    // Every reservoir on the board becomes a node in the flow network. Its
+    // outlet sits at one end of the plank, so a draining reservoir slides
+    // toward the hole rather than shrinking in place.
+    for (const pk of this.source.pockets) {
+      const plate = this.source.plateById.get(pk.def.plate)!;
+      const dir = pk.def.outlet ?? -1;
+      const c = Math.cos(plate.def.rot ?? 0), s = Math.sin(plate.def.rot ?? 0);
+      const half = pk.def.span / 2;
+      this.sand.addReservoir({
+        id: pk.def.id,
+        color: pk.color,
+        total: pk.def.volume,
+        outX: pk.def.x + dir * half * c,
+        outY: pk.def.y + dir * half * s,
+        outZ: plate.z,
+      });
+    }
 
     // Own every sub-model event, then re-emit. Internal bookkeeping runs first,
     // so a view handler can never pre-empt it.
@@ -98,18 +81,19 @@ export class GameModel {
     this.source.events.onPlatePartial = (p) => this.events.onPlatePartial?.(p);
     this.source.events.onPlateRelease = (p) => this.events.onPlateRelease?.(p);
     this.source.events.onPlateGone = (p) => this.events.onPlateGone?.(p);
-    this.source.events.onPocketOpen = (pk) => this.events.onPocketOpen?.(pk);
     this.source.events.onUnlocked = (s) => this.events.onUnlocked?.(s);
-    this.source.events.onRelease = (pk, i, x, y, z) => this.spawnMarble(pk, i, x, y, z);
-
-    this.sorting.events.onReceiverComplete = (r) => {
-      this.completing.push({ r, t: TUNING.RECEIVER_COMPLETE_DELAY + TUNING.RECEIVER_SWAP_DURATION });
-      this.events.onReceiverComplete?.(r);
+    this.source.events.onPocketOpen = (pk) => {
+      // The plank moved; the gate is now open. Material still takes its time.
+      this.sand.open(pk.def.id);
+      this.events.onPocketOpen?.(pk);
     };
-    this.sorting.events.onOverflow = () => this.fail();
-    this.sorting.events.onDispatch = (m, r, i) => this.events.onDispatch?.(m, r, i);
-    this.sorting.events.onSocketFilled = (r, i) => this.events.onSocketFilled?.(r, i);
-    this.sorting.events.onReceiverExposed = (r) => this.events.onReceiverExposed?.(r);
+
+    this.sand.events.onThroatFlow = (r, v) => this.events.onThroatFlow?.(r, v);
+    this.sand.events.onNeckFlow = (c, v) => this.events.onNeckFlow?.(c, v);
+    this.sand.events.onReceiverFlow = (r, v) => this.events.onReceiverFlow?.(r, v);
+    this.sand.events.onReceiverComplete = (r) => this.events.onReceiverComplete?.(r);
+    this.sand.events.onReceiverExposed = (r) => this.events.onReceiverExposed?.(r);
+    this.sand.events.onOverflow = () => { if (this.overflowHold <= 0) this.overflowHold = 900; };
   }
 
   // ------------------------------------------------------------------- input
@@ -140,195 +124,39 @@ export class GameModel {
 
   update(dtMs: number) {
     const scaled = dtMs * TUNING.GAME_SPEED;
-    // Fixed sub-steps keep collisions stable at 4x debug speed and on a 120Hz
-    // screen alike, and give the validator a deterministic march.
+    // Fixed sub-steps so 4x debug speed, a 120Hz screen and the validator all
+    // march the flow network identically.
     const step = 1000 / 120;
     let left = Math.min(scaled, 200);
     while (left > 0) {
       const h = Math.min(step, left);
-      this.substep(h / 1000);
+      this.substep(h);
       left -= h;
     }
   }
 
-  private substep(dt: number) {
-    this.elapsed += dt * 1000;
-    this.source.update(dt);
-    this.driver.step(dt);
-    this.stepMarbles(dt);
-    this.sorting.update(dt);
-    this.syncBelt();
-    this.stepCompletions(dt);
-    if (this.phase === 'play') this.checkEnd();
-  }
-
-  // ------------------------------------------------------------- marbles ---
-
-  private spawnMarble(pk: Pocket, index: number, x: number, y: number, z: number) {
-    const id = this.nextId++;
-    const m: Marble = {
-      id, color: pk.color, state: 'falling',
-      x, y, z, spin: 0, age: 0, t: 0,
-      stillMs: 0, lastX: x, lastY: y,
-      fromX: x, fromY: y, fromZ: z, origin: pk.id, receiverId: '',
-    };
-    this.marbles.push(m);
-    this.byId.set(id, m);
-
-    // Every batch is thrown FORWARD out of the sculpture into the fall slab.
-    // That is what stops a pocket high in the structure raining onto the plates
-    // below it, and it is why the pour reads as a pour rather than a leak.
-    // The launch differs by container so the five pocket types feel different:
-    const spread = TUNING.BATCH_RELEASE_SPREAD;
-    let vx = this.rng.spread(spread);
-    let vy = -2 - this.rng.next() * 3;
-    switch (pk.def.kind) {
-      case 'hopper':        // straight down out of a bottom gate
-        vx *= 0.45; vy = -7 - this.rng.next() * 3; break;
-      case 'tray':          // tips and rolls off the low edge
-        vx = this.rng.spread(spread * 0.7) + (x < LAYOUT.structCX ? -4 : 4);
-        vy = -1 - this.rng.next() * 2; break;
-      case 'rotatingCup':   // flung outward along the arm
-        vx = (x < LAYOUT.structCX ? -1 : 1) * (5 + this.rng.next() * 4);
-        vy = -1 - this.rng.next() * 3; break;
-      case 'wedge':         // avalanches sideways as the wall leaves
-        vx = (x < LAYOUT.structCX ? -1 : 1) * (3 + this.rng.next() * 5);
-        vy = -3 - this.rng.next() * 3; break;
-      case 'pocketBehind':  // simply loses its wall and spills forward
-        vy = -2 - this.rng.next() * 2; break;
+  private substep(ms: number) {
+    this.elapsed += ms;
+    this.source.update(ms / 1000);
+    this.sand.update(ms);
+    if (this.overflowHold > 0) {
+      this.overflowHold -= ms;
+      if (this.overflowHold <= 0) this.fail();
     }
-    this.driver.spawn(id, { x, y, z }, { x: vx, y: vy, z: 7 + this.rng.next() * 4 });
-    this.events.onRelease?.(pk, m);
-  }
-
-  private stepMarbles(dt: number) {
-    const ms = dt * 1000;
-    for (let i = this.marbles.length - 1; i >= 0; i--) {
-      const m = this.marbles[i];
-      m.age += ms;
-
-      if (m.state === 'falling') {
-        if (this.driver.read(m.id, this.scratch)) {
-          m.x = this.scratch.x; m.y = this.scratch.y; m.z = this.scratch.z;
-        }
-        m.spin += dt * 7;
-
-        // Anti-rest. A marble balanced on a guide or wedged in a corner would
-        // otherwise sit there until the rescue timer teleported it, which reads
-        // as the game freezing. Shove it toward the funnel instead.
-        const moved = Math.hypot(m.x - m.lastX, m.y - m.lastY);
-        m.lastX = m.x; m.lastY = m.y;
-        if (moved < 0.035) {
-          m.stillMs += ms;
-          if (m.stillMs > TUNING.ANTI_REST_MS) {
-            m.stillMs = 0;
-            const imp = TUNING.ANTI_REST_IMPULSE;
-            this.driver.nudge(m.id, {
-              x: (m.x === 0 ? this.rng.sign() : -Math.sign(m.x)) * imp * 0.55 + this.rng.spread(imp * 0.3),
-              y: -imp * 0.7,
-              z: this.rng.spread(imp * 0.2),
-            });
-          }
-        } else {
-          m.stillMs = 0;
-        }
-
-        const rescued = m.age > TUNING.MARBLE_RESCUE_MS;
-        if (m.y <= CAPTURE_Y || rescued) {
-          this.driver.despawn(m.id);
-          m.state = 'intake';
-          m.t = 0;
-          m.fromX = rescued ? m.x : m.x; m.fromY = rescued ? m.y : m.y; m.fromZ = m.z;
-        }
-        continue;
-      }
-
-      if (m.state === 'intake') {
-        m.t = Math.min(1, m.t + ms / TUNING.CONVEYOR_INTAKE_MS);
-        const p = this.sorting.path.point(0);
-        const e = smoothstep(m.t);
-        m.x = m.fromX + (p.x - m.fromX) * e;
-        m.y = m.fromY + (p.y - m.fromY) * e;
-        m.z = m.fromZ + (LAYOUT.beltZ - m.fromZ) * e;
-        m.spin += dt * 6;
-        if (m.t >= 1) {
-          const b = this.sorting.admit(m.id, m.color, 0);
-          if (!b) { this.removeMarble(i); continue; }
-          m.state = 'belt';
-          this.events.onMarbleLanded?.(m);
-        }
-        continue;
-      }
-
-      if (m.state === 'delivering') {
-        // Position is written by syncBelt from the delivery record.
-        continue;
-      }
-    }
-  }
-
-  /** Copy belt/delivery positions onto the marble objects the renderer reads. */
-  private syncBelt() {
-    for (const b of this.sorting.belt) {
-      const m = this.byId.get(b.id);
-      if (!m) continue;
-      const p = this.sorting.path.point(b.s);
-      m.state = 'belt';
-      m.x = p.x; m.y = p.y; m.z = LAYOUT.beltZ;
-      m.spin = b.spin;
-    }
-    for (const d of this.sorting.deliveries) {
-      const m = this.byId.get(d.marble.id);
-      if (!m) continue;
-      m.state = 'delivering';
-      m.receiverId = d.receiver.id;
-      const t = clamp(d.t, 0, 1);
-      const e = smoothstep(t);
-      m.x = d.fromX + (d.toX - d.fromX) * e;
-      m.y = d.fromY + (d.toY - d.fromY) * e - Math.sin(Math.PI * t) * 2.2;
-      m.z = d.toZ * e;
-      m.spin += 0.25;
-    }
-    // Anything that finished delivering is now sitting in a socket.
-    for (const m of this.marbles) {
-      if (m.state !== 'delivering') continue;
-      if (!this.sorting.deliveries.some((d) => d.marble.id === m.id)) m.state = 'socketed';
-    }
-  }
-
-  private removeMarble(index: number) {
-    const m = this.marbles[index];
-    this.marbles.splice(index, 1);
-    this.byId.delete(m.id);
-  }
-
-  private stepCompletions(dt: number) {
-    for (let i = this.completing.length - 1; i >= 0; i--) {
-      const c = this.completing[i];
-      c.t -= dt * 1000;
-      if (c.t > 0) continue;
-      this.completing.splice(i, 1);
-      this.sorting.advanceColumn(c.r);
-      // The marbles go with the box. Leaving them behind was leaving three
-      // spheres hanging in mid-air where a receiver used to be.
-      for (let k = this.marbles.length - 1; k >= 0; k--) {
-        if (this.marbles[k].receiverId === c.r.id) this.removeMarble(k);
-      }
-    }
+    this.checkEnd();
   }
 
   // ------------------------------------------------------------- end states
 
-  get airborne() { return this.marbles.filter((m) => m.state === 'falling' || m.state === 'intake').length; }
+  /** Sand anywhere between the structure and the receivers. */
+  get inFlight() { return this.sand.inFlight; }
 
   private checkEnd() {
-    if (this.sorting.overflowed) return this.fail();
+    if (this.phase !== 'play') return;
     if (
       this.source.allEmpty &&
-      this.airborne === 0 &&
-      this.sorting.idle &&
-      this.sorting.allDone &&
-      this.completing.length === 0
+      this.sand.idle &&
+      this.sand.allDone
     ) {
       this.phase = 'won';
       this.events.onWin?.();
@@ -343,36 +171,9 @@ export class GameModel {
 
   // ------------------------------------------------------------------ debug
 
-  debugClearConveyor() {
-    for (const b of this.sorting.belt) {
-      const i = this.marbles.findIndex((m) => m.id === b.id);
-      if (i >= 0) this.removeMarble(i);
-    }
-    this.sorting.debugClear();
-  }
-
-  /** Park `n` marbles of a colour that currently has nowhere to go. */
-  debugFillConveyor(n = TUNING.CONVEYOR_CAPACITY - 2) {
-    const exposed = this.sorting.exposedColors();
-    const dead = (['green', 'red', 'blue', 'yellow'] as MarbleColor[]).filter((c) => !exposed.has(c));
-    const pool = dead.length ? dead : (['green'] as MarbleColor[]);
-    let i = 0;
-    while (this.sorting.load < n && i < 64) {
-      const id = this.nextId++;
-      const color = pool[i % pool.length];
-      const s = this.sorting.path.wrap(i * TUNING.CONVEYOR_MIN_GAP * 1.35);
-      const b = this.sorting.admit(id, color, s);
-      if (!b) break;
-      const p = this.sorting.path.point(b.s);
-      const m: Marble = {
-        id, color, state: 'belt', x: p.x, y: p.y, z: LAYOUT.beltZ,
-        spin: 0, age: 0, t: 0, stillMs: 0, lastX: p.x, lastY: p.y,
-        fromX: p.x, fromY: p.y, fromZ: 0, origin: 'debug', receiverId: '',
-      };
-      this.marbles.push(m); this.byId.set(id, m);
-      i++;
-    }
-  }
+  debugClearBuffer() { this.sand.debugClearBuffer(); }
+  debugFillBuffer(fraction = 0.9) { this.sand.debugFillBuffer(fraction); }
+  debugCompleteExposed() { this.sand.debugCompleteExposed(); }
 
   /** Snapshot for assertions and the console harness. */
   state() {
@@ -381,15 +182,15 @@ export class GameModel {
       taps: this.taps,
       screwsLeft: this.source.remaining().length,
       platesLeft: this.source.platesLeft,
-      marblesInRack: this.source.marblesLeft,
+      sandInStructure: +this.sand.sourceLeft.toFixed(1),
       accessible: this.source.accessible().map((s) => s.id),
-      airborne: this.airborne,
-      belt: `${this.sorting.load}/${this.sorting.capacity}`,
-      beltColors: this.sorting.belt.map((b) => b.color[0]).join(''),
-      exposed: this.sorting.activeReceivers().map((r) => `${r.color}:${r.filled}/${TUNING.RECEIVER_CAPACITY}`),
-      boxesLeft: this.sorting.boxesLeft,
+      inFlight: +this.sand.inFlight.toFixed(1),
+      buffer: `${Math.round(this.sand.bufferPercent)}%`,
+      bufferByColor: this.sand.bufferByColor(),
+      exposed: this.sand.activeReceivers().map((r) => `${r.color}:${Math.round(r.fill)}%`),
+      receiversLeft: this.sand.receiversLeft,
     };
   }
 }
 
-export type { Plate, Pocket, Screw, Receiver, BeltMarble };
+export type { Plate, Pocket, Screw, Receiver, Reservoir };

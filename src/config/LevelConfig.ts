@@ -129,20 +129,26 @@ export interface ScrewDef {
   plate: string;
 }
 
+/** A sand reservoir built into a plank. */
 export interface PocketDef {
   id: string;
   color: MarbleColor;
-  count: number;
+  /** VOLUME in units, not a marble count. One receiver holds 100. */
+  volume: number;
   kind: PocketKind;
   /** Plate whose motion frees it. */
   plate: string;
   /** 'partial' = spills as soon as that plate swings; 'detached' = only when
    *  the plate has left entirely. */
   releaseAt: 'partial' | 'detached';
-  /** Batch anchor, world coords at rest. Follows its plate while it moves. */
+  /** Reservoir anchor, world coords at rest. Follows its plank as it moves. */
   x: number; y: number;
-  cols: number;
-  spacing?: number;
+  /** How far along the plank the reservoir runs, in world units. The visible
+   *  sand column is this long, so a big reservoir looks like more material. */
+  span: number;
+  /** Where the outlet sits along the plank, -1..1 from the anchor. The throat
+   *  is deliberately a small fraction of `span` — see TUNING.OUTLET_WIDTH. */
+  outlet?: number;
 }
 
 export interface GuideDef {
@@ -338,13 +344,13 @@ export const LEVEL_1: LevelDef = {
   // uprights take three — a small spill is a different decision from a big one,
   // and that difference is most of the puzzle.
   pockets: [
-    { id: 'pkDiag', color: 'green', count: 9, kind: 'wedge', plate: 'diag', releaseAt: 'partial', x: (D1.x + D2.x) / 2, y: (D1.y + D2.y) / 2, cols: 9, spacing: 2.1 },
-    { id: 'pkTop', color: 'red', count: 6, kind: 'tray', plate: 'topBar', releaseAt: 'detached', x: -3, y: TOP_Y, cols: 6, spacing: 2.1 },
-    { id: 'pkMid', color: 'blue', count: 6, kind: 'tray', plate: 'midBar', releaseAt: 'detached', x: -3, y: MID_Y, cols: 6, spacing: 2.1 },
-    { id: 'pkLow', color: 'yellow', count: 6, kind: 'pocketBehind', plate: 'lowBar', releaseAt: 'detached', x: -3, y: LOW_Y, cols: 6, spacing: 2.1 },
-    { id: 'pkVLeft', color: 'yellow', count: 3, kind: 'rotatingCup', plate: 'vLeft', releaseAt: 'detached', x: VL_X, y: 27.5, cols: 3, spacing: 2.1 },
-    { id: 'pkVRight', color: 'red', count: 3, kind: 'rotatingCup', plate: 'vRight', releaseAt: 'detached', x: VR_X, y: 18.5, cols: 3, spacing: 2.1 },
-    { id: 'pkVMid', color: 'blue', count: 3, kind: 'hopper', plate: 'vMid', releaseAt: 'detached', x: VM_X, y: 14.6, cols: 3, spacing: 2.1 },
+    { id: 'pkDiag', color: 'green', volume: 300, kind: 'wedge', plate: 'diag', releaseAt: 'partial', x: (D1.x + D2.x) / 2, y: (D1.y + D2.y) / 2, span: 19.0 },
+    { id: 'pkTop', color: 'red', volume: 200, kind: 'tray', plate: 'topBar', releaseAt: 'detached', x: -3, y: TOP_Y, span: 20.0 },
+    { id: 'pkMid', color: 'blue', volume: 200, kind: 'tray', plate: 'midBar', releaseAt: 'detached', x: -3, y: MID_Y, span: 22.0 },
+    { id: 'pkLow', color: 'yellow', volume: 200, kind: 'pocketBehind', plate: 'lowBar', releaseAt: 'detached', x: -3, y: LOW_Y, span: 20.0 },
+    { id: 'pkVLeft', color: 'yellow', volume: 100, kind: 'rotatingCup', plate: 'vLeft', releaseAt: 'detached', x: VL_X, y: 27.5, span: 7.0 },
+    { id: 'pkVRight', color: 'red', volume: 100, kind: 'rotatingCup', plate: 'vRight', releaseAt: 'detached', x: VR_X, y: 18.5, span: 7.0 },
+    { id: 'pkVMid', color: 'blue', volume: 100, kind: 'hopper', plate: 'vMid', releaseAt: 'detached', x: VM_X, y: 14.6, span: 7.0 },
 
   ],
 
@@ -391,8 +397,8 @@ const L2_DA = pt(7.5, 13), L2_DB = pt(10.5, 25);        // the one diagonal
 export const LEVEL_2: LevelDef = {
   id: 'scaffold',
   name: 'SCAFFOLD',
-  // Hard on purpose: the best possible play still fills 7/8 of the belt.
-  peakBudget: 0.9,
+  // Hard on purpose: the best play found still fills 94% of the channel.
+  peakBudget: 0.95,
 
   plates: [
     // --- top layer: four uprights and a diagonal, none of which touch each
@@ -473,14 +479,14 @@ export const LEVEL_2: LevelDef = {
 
   // 54 marbles. BLUE exists only on `railMid`, the last plank on the board.
   pockets: [
-    { id: 'p2Top', color: 'red', count: 9, kind: 'tray', plate: 'railTop', releaseAt: 'detached', x: -2, y: L2_TOP, cols: 9, spacing: 2.1 },
-    { id: 'p2Mid', color: 'blue', count: 9, kind: 'tray', plate: 'railMid', releaseAt: 'detached', x: -2, y: L2_MID, cols: 9, spacing: 2.1 },
-    { id: 'p2Low', color: 'yellow', count: 9, kind: 'pocketBehind', plate: 'railLow', releaseAt: 'detached', x: -1, y: L2_LOW, cols: 9, spacing: 2.1 },
-    { id: 'p2Diag', color: 'green', count: 6, kind: 'wedge', plate: 'diag', releaseAt: 'partial', x: (L2_DA.x + L2_DB.x) / 2, y: (L2_DA.y + L2_DB.y) / 2, cols: 6, spacing: 2.1 },
-    { id: 'p2UpA', color: 'green', count: 3, kind: 'rotatingCup', plate: 'upA', releaseAt: 'detached', x: L2_UA, y: 30, cols: 3, spacing: 2.1 },
-    { id: 'p2UpB', color: 'red', count: 3, kind: 'rotatingCup', plate: 'upB', releaseAt: 'detached', x: L2_UB, y: 18, cols: 3, spacing: 2.1 },
-    { id: 'p2UpC', color: 'red', count: 3, kind: 'rotatingCup', plate: 'upC', releaseAt: 'detached', x: L2_UC, y: 18, cols: 3, spacing: 2.1 },
-    { id: 'p2UpD', color: 'yellow', count: 3, kind: 'hopper', plate: 'upD', releaseAt: 'detached', x: L2_UD, y: 30, cols: 3, spacing: 2.1 },
+    { id: 'p2Top', color: 'red', volume: 300, kind: 'tray', plate: 'railTop', releaseAt: 'detached', x: -2, y: L2_TOP, span: 24.0 },
+    { id: 'p2Mid', color: 'blue', volume: 300, kind: 'tray', plate: 'railMid', releaseAt: 'detached', x: -2, y: L2_MID, span: 24.0 },
+    { id: 'p2Low', color: 'yellow', volume: 300, kind: 'pocketBehind', plate: 'railLow', releaseAt: 'detached', x: -1, y: L2_LOW, span: 22.0 },
+    { id: 'p2Diag', color: 'green', volume: 200, kind: 'wedge', plate: 'diag', releaseAt: 'partial', x: (L2_DA.x + L2_DB.x) / 2, y: (L2_DA.y + L2_DB.y) / 2, span: 11.0 },
+    { id: 'p2UpA', color: 'green', volume: 100, kind: 'rotatingCup', plate: 'upA', releaseAt: 'detached', x: L2_UA, y: 30, span: 7.0 },
+    { id: 'p2UpB', color: 'red', volume: 100, kind: 'rotatingCup', plate: 'upB', releaseAt: 'detached', x: L2_UB, y: 18, span: 7.0 },
+    { id: 'p2UpC', color: 'red', volume: 100, kind: 'rotatingCup', plate: 'upC', releaseAt: 'detached', x: L2_UC, y: 18, span: 7.0 },
+    { id: 'p2UpD', color: 'yellow', volume: 100, kind: 'hopper', plate: 'upD', releaseAt: 'detached', x: L2_UD, y: 30, span: 7.0 },
   ],
 
   // 18 boxes x 3 = 54. Re-solved by `npm run tune -- --level 2`.
@@ -511,9 +517,10 @@ export function plateTint(level: LevelDef, plateId: string): PlateTint {
   return pk ? pk.color : 'neutral';
 }
 
+/** Sand volume authored on the board, per colour. */
 export function colorSupply(level: LevelDef): Record<string, number> {
   const out: Record<string, number> = {};
-  for (const p of level.pockets) out[p.color] = (out[p.color] ?? 0) + p.count;
+  for (const p of level.pockets) out[p.color] = (out[p.color] ?? 0) + p.volume;
   return out;
 }
 
@@ -525,16 +532,32 @@ export function colorDemand(level: LevelDef): Record<string, number> {
   return out;
 }
 
-/** Marble slot offsets inside a pocket, filled bottom row first. */
-export function pocketSlot(p: PocketDef, index: number) {
-  const cols = p.cols;
-  const rows = Math.ceil(p.count / cols);
-  const s = p.spacing ?? LAYOUT.pocketSpacing;
-  const i = p.count - 1 - index; // drain from the bottom up
-  const r = Math.floor(i / cols);
-  const c = i % cols;
-  return {
-    dx: (c - (cols - 1) / 2) * s,
-    dy: (r - (rows - 1) / 2) * s,
-  };
+/**
+ * Where the sand column inside a plank runs, in plank-local coordinates.
+ *
+ * The reservoir is a band along the plank's own axis. `t` is 0 at the outlet end
+ * and 1 at the far end, so a draining reservoir empties TOWARD its outlet rather
+ * than shrinking symmetrically — which is what makes it look like material
+ * sliding to the hole instead of a bar chart going down.
+ */
+export function reservoirBand(p: PocketDef) {
+  const half = p.span / 2;
+  const dir = p.outlet ?? -1;
+  return { half, outletT: dir };
+}
+
+/** Colour totals authored on the board, per colour. */
+export function sandSupply(level: LevelDef) {
+  const out: Record<string, number> = {};
+  for (const k of level.pockets) out[k.color] = (out[k.color] ?? 0) + k.volume;
+  return out;
+}
+
+/** What the receiver stacks ask for, per colour. */
+export function sandDemand(level: LevelDef, receiverCapacity: number) {
+  const out: Record<string, number> = {};
+  for (const col of level.receiverStacks) {
+    for (const c of col) out[c] = (out[c] ?? 0) + receiverCapacity;
+  }
+  return out;
 }

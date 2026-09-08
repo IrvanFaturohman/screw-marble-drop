@@ -21,7 +21,7 @@
 
 import { LAYOUT, TUNING, type MarbleColor } from '../config/GameConfig';
 import {
-  pocketSlot, type LevelDef, type PlateDef, type PocketDef, type ScrewDef,
+  type LevelDef, type PlateDef, type PocketDef, type ScrewDef,
 } from '../config/LevelConfig';
 import { containsWorld, shapeBounds, shapeBoxRot, toLocal, toWorld, type PlateTransform } from './PlateShapes';
 import { clamp, smoothstep } from './Geometry';
@@ -189,21 +189,23 @@ export class Plate {
   }
 }
 
+/**
+ * A sand reservoir's PLACE in the structure — which plank holds it, where it
+ * sits, and whether the structure has opened it yet. How much sand is in it and
+ * where that sand goes is the SandModel's business; this class deliberately
+ * knows nothing about volume.
+ */
 export class Pocket {
   readonly def: PocketDef;
   readonly id: string;
   readonly color: MarbleColor;
-  readonly total: number;
-  pending: number;
   open = false;
-  releaseTimer = 0;
   /** Anchor in the plate's LOCAL frame, so it travels with the plate. */
   readonly lx: number;
   readonly ly: number;
 
   constructor(def: PocketDef, plate: Plate) {
     this.def = def; this.id = def.id; this.color = def.color;
-    this.total = def.count; this.pending = def.count;
     // The anchor is authored in WORLD space; convert it into the plate's local
     // frame ONCE, at rest. Storing a world-space delta and then handing it to
     // localToWorld would apply the plate's tilt a second time, which put every
@@ -215,7 +217,6 @@ export class Pocket {
     this.lx = lx;
     this.ly = ly;
   }
-  get drained() { return this.pending <= 0; }
 }
 
 export interface SourceEvents {
@@ -224,7 +225,6 @@ export interface SourceEvents {
   onPlateRelease?: (p: Plate) => void;
   onPlateGone?: (p: Plate) => void;
   onPocketOpen?: (pk: Pocket) => void;
-  onRelease?: (pk: Pocket, index: number, x: number, y: number, z: number) => void;
   onUnlocked?: (s: Screw) => void;
 }
 
@@ -336,8 +336,9 @@ export class SourceModel {
 
   accessible(): Screw[] { return this.screws.filter((s) => this.isAccessible(s)); }
   remaining(): Screw[] { return this.screws.filter((s) => !s.removed); }
-  get marblesLeft() { return this.pockets.reduce((n, p) => n + p.pending, 0); }
-  get allEmpty() { return this.pockets.every((p) => p.drained); }
+  /** Every reservoir the structure was hiding has been opened. Whether the sand
+   *  has finished LEAVING is the SandModel's answer, not this one's. */
+  get allEmpty() { return this.pockets.every((p) => p.open); }
   get platesLeft() { return this.plates.filter((p) => p.present).length; }
 
   // ------------------------------------------------------------------ input
@@ -402,7 +403,6 @@ export class SourceModel {
     }
 
     this.checkPockets();
-    for (const pk of this.pockets) if (pk.open && pk.pending > 0) this.pour(pk, ms);
     this.checkUnlocks();
   }
 
@@ -457,7 +457,7 @@ export class SourceModel {
    */
   private checkPockets() {
     for (const pk of this.pockets) {
-      if (pk.open || pk.drained) continue;
+      if (pk.open) continue;
       const plate = this.plateById.get(pk.def.plate)!;
       const ready = pk.def.releaseAt === 'partial'
         ? (plate.state === 'partial' ? plate.t >= 0.45 : plate.state === 'releasing' || plate.state === 'gone')
@@ -465,20 +465,6 @@ export class SourceModel {
       if (!ready) continue;
       pk.open = true;
       this.events.onPocketOpen?.(pk);
-    }
-  }
-
-  private pour(pk: Pocket, ms: number) {
-    pk.releaseTimer -= ms;
-    const plate = this.plateById.get(pk.def.plate)!;
-    let guard = 0;
-    while (pk.pending > 0 && pk.releaseTimer <= 0 && guard++ < 20) {
-      const index = pk.total - pk.pending;
-      const slot = pocketSlot(pk.def, index);
-      const [wx, wy] = plate.localToWorld(pk.lx + slot.dx, pk.ly + slot.dy);
-      this.events.onRelease?.(pk, index, wx, wy, plate.z);
-      pk.pending--;
-      pk.releaseTimer += TUNING.BATCH_RELEASE_INTERVAL;
     }
   }
 

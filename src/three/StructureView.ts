@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { COLORS, ENV, LAYOUT, plateShade, TUNING } from '../config/GameConfig';
-import { plateTint, pocketSlot } from '../config/LevelConfig';
+import { plateTint } from '../config/LevelConfig';
 import type { GameModel } from '../game/GameModel';
 import type { Plate, Pocket, Screw } from '../game/SourceModel';
 import type { ShapeDef } from '../game/PlateShapes';
 import { GEO, metalMaterial } from './Materials';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Rng } from '../util/Rng';
 
 interface PlateView {
@@ -19,7 +20,7 @@ interface PlateView {
   baseRim: THREE.Color;
   mat: THREE.MeshPhysicalMaterial;
   rimMat: THREE.LineBasicMaterial;
-  pockets: { pocket: Pocket; mesh: THREE.InstancedMesh }[];
+  pockets: { pocket: Pocket; mesh: THREE.Mesh }[];
   wells: THREE.Mesh[];
   /** One per screw through this plank, uncovered when that screw comes out. */
   holes: { mesh: THREE.Mesh; screw: Screw; sx: number; sy: number }[];
@@ -30,8 +31,6 @@ interface ScrewView {
   screw: Screw;
   group: THREE.Group;
   head: THREE.Group;
-  ready: THREE.Mesh;
-  locked: THREE.Mesh;
   pulse: number;
   baseZ: number;
   /** This screw's own materials, so it can fade out independently. */
@@ -47,7 +46,7 @@ const PLATE_THICK = 0.24;
 /** Front face of a plate in its own local space. */
 const PLATE_FACE = PLATE_THICK / 2 + 0.05;
 /** A seated bead, flat in the channel — deliberately smaller than a marble. */
-const PIP_R = TUNING.MARBLE_RADIUS * 0.62;
+const PIP_R = 0.65;
 
 /**
  * The screw sculpture.
@@ -172,45 +171,45 @@ export class StructureView {
     // Pockets ride inside the plate group, so they move with what holds them.
     for (const pk of this.model.source.pockets) {
       if (pk.def.plate !== plate.id) continue;
-      // A LOADED BEAD IS A FLUSH PIP, NOT A MARBLE.
+      // A RESERVOIR IS A COLUMN OF SAND SEEN THROUGH THE PLANK.
       //
-      // Spheres sat a full radius proud of the stick and visibly hung over its
-      // edges — marbles that looked like they were already falling out. A real
-      // board does not show its contents in relief; it shows drilled seats. So
-      // while a batch is stored it is a flat disc set into the channel, and the
-      // actual 3D marbles only exist once they are pouring.
-      const mesh = new THREE.InstancedMesh(GEO.socket, pipMat(pk.color), pk.total);
-      mesh.frustumCulled = false;
-      for (let i = 0; i < pk.total; i++) {
-        const slot = pocketSlot(pk.def, i);
-        dummy.position.set(pk.lx + slot.dx, pk.ly + slot.dy, PLATE_FACE + 0.02);
-        dummy.rotation.set(Math.PI / 2, 0, 0);
-        dummy.scale.set(PIP_R, 0.06, PIP_R);
-        dummy.updateMatrix();
-        mesh.setMatrixAt(i, dummy.matrix);
-      }
-      mesh.instanceMatrix.needsUpdate = true;
+      // Not beads, not slots: a band whose LENGTH is the fraction still inside,
+      // anchored at the outlet end so a draining reservoir slides toward its
+      // hole instead of shrinking from both ends. That is what makes the plank
+      // read as a container of loose material rather than a magazine.
+      const mesh = new THREE.Mesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        new THREE.MeshStandardMaterial({
+          color: COLORS[pk.color].hex, roughness: 0.95, metalness: 0, flatShading: true,
+        }),
+      );
       group.add(mesh);
       view.pockets.push({ pocket: pk, mesh });
     }
 
-    // A darker well behind each batch, so glossy marbles read against a plate
-    // that now shares their hue instead of dissolving into it.
+    // The routed channel the sand sits in, plus the NARROW OUTLET at one end.
+    // The outlet is drawn at a fraction of the channel width on purpose — it is
+    // the thing the material has to squeeze through, and it has to look like it.
     for (const pk of this.model.source.pockets) {
       if (pk.def.plate !== plate.id) continue;
-      const cols = pk.def.cols;
-      const rows = Math.ceil(pk.total / cols);
-      const sp = pk.def.spacing ?? LAYOUT.pocketSpacing;
-      const w = (cols - 1) * sp + PIP_R * 3.4;
-      const h = (rows - 1) * sp + PIP_R * 3.4;
-      const wellShape = buildShape({ kind: 'bar', w, h, r: PIP_R * 1.6 });
+      const span = pk.def.span;
+      const chanH = (d.shape.kind === 'bar' ? d.shape.h : 4) - 1.4;
+      const wellShape = buildShape({ kind: 'bar', w: span, h: chanH, r: chanH / 2 });
       const wellGeo = new THREE.ExtrudeGeometry(wellShape, { depth: 0.04, bevelEnabled: false, curveSegments: 12 });
-      const well = new THREE.Mesh(wellGeo, new THREE.MeshStandardMaterial({ color: tint.well, roughness: 0.9 }));
-      // Flush with the face: on a stick this thin a raised well would be most
-      // of its depth. It reads as a routed channel, not a box.
-      well.position.set(pk.lx, pk.ly, PLATE_FACE);
+      const well = new THREE.Mesh(wellGeo, new THREE.MeshStandardMaterial({ color: tint.well, roughness: 0.95 }));
+      well.position.set(pk.lx, pk.ly, PLATE_FACE - 0.01);
       group.add(well);
       view.wells.push(well);
+
+      const dir = pk.def.outlet ?? -1;
+      const throatW = span * TUNING.OUTLET_WIDTH;
+      const throat = new THREE.Mesh(
+        new THREE.BoxGeometry(throatW, chanH * 0.42, 0.08),
+        new THREE.MeshStandardMaterial({ color: 0x2c231a, roughness: 1 }),
+      );
+      throat.position.set(pk.lx + dir * (span / 2 - throatW / 2), pk.ly - chanH * 0.42, PLATE_FACE + 0.02);
+      group.add(throat);
+      view.wells.push(throat);
     }
 
     // THE HOLE THE SCREW CAME OUT OF.
@@ -242,57 +241,61 @@ export class StructureView {
     const g = new THREE.Group();
     g.position.set(screw.x, screw.y, baseZ);
 
+    // ONE MESH PER SCREW.
+    //
+    // Boss, cap, ring and both slots are rigid relative to each other and only
+    // ever spin together about z, so they are baked into a single geometry with
+    // the colours in the vertices. Five meshes each was sixty draw calls a frame
+    // for twelve screws — more than the rest of the board put together.
     const head = new THREE.Group();
-    // Chunky, dark, and unmistakably not a marble.
-    const boss = new THREE.Mesh(GEO.screwHead, metalMaterial(ENV.metalDeep, 0.45));
-    boss.scale.set(LAYOUT.screwR * 1.3, 0.55, LAYOUT.screwR * 1.3);
-    boss.rotation.x = Math.PI / 2;
-    head.add(boss);
-    const cap = new THREE.Mesh(GEO.screwHead, metalMaterial(ENV.metal, 0.22));
-    cap.scale.set(LAYOUT.screwR, 0.8, LAYOUT.screwR);
-    cap.rotation.x = Math.PI / 2;
-    cap.position.z = 0.45;
-    cap.castShadow = true;
-    head.add(cap);
-    // Neutral hardware ring. Now that plates carry the batch colour, a coloured
-    // screw would imply screw colour feeds the receivers. It never does.
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(LAYOUT.screwR * 0.8, 0.16, 8, 22), metalMaterial(0x8b93a0, 0.35));
-    ring.position.z = 0.86;
-    head.add(ring);
+    const parts: THREE.BufferGeometry[] = [];
+    const add = (geo: THREE.BufferGeometry, hex: number) => {
+      const g2 = geo.toNonIndexed();
+      const n = g2.attributes.position.count;
+      const col = new Float32Array(n * 3);
+      const c = new THREE.Color(hex);
+      for (let i = 0; i < n; i++) { col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b; }
+      g2.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      parts.push(g2);
+    };
+    const boss = GEO.screwHead.clone();
+    boss.scale(LAYOUT.screwR * 1.3, 0.55, LAYOUT.screwR * 1.3);
+    boss.rotateX(Math.PI / 2);
+    add(boss, ENV.metalDeep);
+    const cap = GEO.screwHead.clone();
+    cap.scale(LAYOUT.screwR, 0.8, LAYOUT.screwR);
+    cap.rotateX(Math.PI / 2);
+    cap.translate(0, 0, 0.45);
+    add(cap, ENV.metal);
+    // Neutral hardware. Screw colour must never imply anything about sand colour.
+    const ring = new THREE.TorusGeometry(LAYOUT.screwR * 0.8, 0.16, 8, 22);
+    ring.translate(0, 0, 0.86);
+    add(ring, 0x8b93a0);
     for (const a of [0, Math.PI / 2]) {
-      const slot = new THREE.Mesh(GEO.box, metalMaterial(0x2a2f38, 0.55));
-      slot.scale.set(LAYOUT.screwR * 1.3, 0.32, 0.26);
-      slot.position.z = 0.88;
-      slot.rotation.z = a;
-      head.add(slot);
+      const slot = new THREE.BoxGeometry(1, 1, 1);
+      slot.scale(LAYOUT.screwR * 1.3, 0.32, 0.26);
+      slot.rotateZ(a);
+      slot.translate(0, 0, 0.88);
+      add(slot, 0x2a2f38);
     }
+    const merged = mergeGeometries(parts);
+    const headMesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({
+      vertexColors: true, roughness: 0.34, metalness: 0.72,
+    }));
+    headMesh.castShadow = true;
+    head.add(headMesh);
     g.add(head);
 
-    // NO "tappable" ring. Every screw on the board is tappable, so a highlight
-    // on all thirteen is thirteen highlights and no information — it just buried
-    // the planks. What is worth flagging is the opposite: a plank whose screws
-    // are all out and which is only waiting for the one on top of it to go.
-    // That cue lives on the PLANK (see `loose` in update), not on the screw.
-    const ready = new THREE.Mesh(
-      new THREE.TorusGeometry(LAYOUT.screwR * 1.45, 0.16, 8, 26),
-      new THREE.MeshBasicMaterial({ color: 0xffe14d, transparent: true, opacity: 0 }),
-    );
-    ready.position.z = 1.0;
-    ready.visible = false;
-    const locked = new THREE.Mesh(
-      new THREE.TorusGeometry(LAYOUT.screwR * 1.34, 0.13, 8, 26),
-      new THREE.MeshBasicMaterial({ color: 0x544d43, transparent: true, opacity: 0.75 }),
-    );
-    locked.position.z = 0.9;
-    locked.visible = false;
-    g.add(ready, locked);
+    // NO "tappable" ring, and no mesh for one either. Every screw on the board
+    // is tappable, so a highlight on all of them is no information — and two
+    // invisible meshes per screw was 24 draw calls a frame for nothing.
 
     this.group.add(g);
     // metalMaterial() mints a fresh material per call, so each screw owns its
     // own and can fade without touching its neighbours.
     const mats: THREE.Material[] = [];
     head.traverse((o) => { if ((o as THREE.Mesh).isMesh) mats.push((o as THREE.Mesh).material as THREE.Material); });
-    const v: ScrewView = { screw, group: g, head, ready, locked, pulse: Math.random() * 6.28, baseZ, mats, gone: 0 };
+    const v: ScrewView = { screw, group: g, head, pulse: Math.random() * 6.28, baseZ, mats, gone: 0 };
     this.screwViews.push(v);
     this.byScrew.set(screw.id, v);
   }
@@ -310,7 +313,7 @@ export class StructureView {
     v.body.rotation.z = p.def.rot ?? 0;
     v.rim.position.copy(v.body.position); v.rim.rotation.z = v.body.rotation.z;
     v.shade.position.copy(v.body.position); v.shade.rotation.z = v.body.rotation.z;
-    for (const pk of v.pockets) { pk.mesh.position.copy(v.body.position); pk.mesh.rotation.z = v.body.rotation.z; }
+    for (const pk of v.pockets) { pk.mesh.rotation.z = v.body.rotation.z; }
     for (const w of v.wells) { w.position.copy(v.body.position); w.rotation.z = v.body.rotation.z; }
     // Holes are authored in world space, so they hang off the pivot directly
     // rather than off the body — the group's own rotation carries them.
@@ -356,9 +359,25 @@ export class StructureView {
         v.group.position.z += (0 - v.group.position.z) * Math.min(1, dt * 8);
       }
 
+      // The sand still inside, drawn from the AUTHORITATIVE volume. A reservoir
+      // that has poured half its material is visibly half full, anchored at its
+      // outlet so the remainder has slid toward the hole.
       for (const pk of v.pockets) {
-        const shown = pk.pocket.pending;
-        if (pk.mesh.count !== shown) pk.mesh.count = Math.max(0, shown);
+        const res = this.model.sand.byId.get(pk.pocket.id);
+        if (!res) { pk.mesh.visible = false; continue; }
+        const frac = res.total > 0 ? res.remaining / res.total : 0;
+        const span = pk.pocket.def.span;
+        const dir = pk.pocket.def.outlet ?? -1;
+        const len = Math.max(0.001, span * frac);
+        const chanH = (p.def.shape.kind === 'bar' ? p.def.shape.h : 4) - 1.9;
+        pk.mesh.visible = frac > 0.004;
+        pk.mesh.scale.set(len, chanH, 0.5);
+        // Anchor at the outlet end: the far end is what recedes.
+        pk.mesh.position.set(
+          pk.pocket.lx + dir * (span / 2 - len / 2),
+          pk.pocket.ly,
+          PLATE_FACE + 0.03,
+        );
       }
     }
 
@@ -388,7 +407,6 @@ export class StructureView {
       if (s.unscrewing) {
         v.head.rotation.z = -s.t * TUNING.UNSCREW_TURNS * Math.PI * 2;
         v.group.position.z = v.baseZ + s.t * TUNING.UNSCREW_LIFT;
-        v.ready.visible = false; v.locked.visible = false;
         continue;
       }
       // Every head sits proud of whatever it is driven through, at the same

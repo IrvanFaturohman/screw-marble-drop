@@ -4,7 +4,6 @@ import { COLORS, ENV, TUNING, type MarbleColor } from '../config/GameConfig';
 /** Shared geometry + materials. One instance each, reused everywhere. */
 
 export const GEO = {
-  marble: new THREE.SphereGeometry(TUNING.MARBLE_RADIUS, 20, 14),
   box: new THREE.BoxGeometry(1, 1, 1),
   screwHead: new THREE.CylinderGeometry(1, 1, 1, 22),
   socket: new THREE.CylinderGeometry(1, 1, 1, 18),
